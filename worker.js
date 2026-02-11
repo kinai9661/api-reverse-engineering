@@ -9,9 +9,29 @@ export default {
           headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
           }
         });
+      }
+
+      // API Key 验证（仅对 API 端点生效）
+      if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/api/')) {
+        const authResult = authenticateRequest(request, env);
+        if (!authResult.success) {
+          return new Response(JSON.stringify({
+            error: {
+              message: authResult.message,
+              type: "authentication_error",
+              code: "invalid_api_key"
+            }
+          }), {
+            status: 401,
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*'
+            }
+          });
+        }
       }
 
       // OpenAI-compatible API endpoints
@@ -26,6 +46,11 @@ export default {
       // 原有的 API 端點
       if (url.pathname === '/api/generate' && request.method === 'POST') {
         return await handleGenerate(request);
+      }
+
+      // API Key 管理端点
+      if (url.pathname === '/api/verify-key' && request.method === 'POST') {
+        return handleVerifyKey(request, env);
       }
 
       // 返回 HTML UI
@@ -48,6 +73,67 @@ export default {
     }
   }
 };
+
+// API Key 验证函数
+function authenticateRequest(request, env) {
+  // 如果没有设置 API_KEY 环境变量，跳过验证（开发模式）
+  const requiredKey = env?.API_KEY;
+  if (!requiredKey) {
+    return { success: true };
+  }
+
+  // 从多个位置尝试获取 API Key
+  let providedKey = null;
+
+  // 1. Authorization header (Bearer token)
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    providedKey = authHeader.substring(7);
+  }
+
+  // 2. X-API-Key header
+  if (!providedKey) {
+    providedKey = request.headers.get('X-API-Key');
+  }
+
+  // 3. Query parameter
+  if (!providedKey) {
+    const url = new URL(request.url);
+    providedKey = url.searchParams.get('api_key');
+  }
+
+  // 验证 API Key
+  if (!providedKey) {
+    return {
+      success: false,
+      message: 'Missing API key. Please provide via Authorization header, X-API-Key header, or api_key query parameter.'
+    };
+  }
+
+  if (providedKey !== requiredKey) {
+    return {
+      success: false,
+      message: 'Invalid API key.'
+    };
+  }
+
+  return { success: true };
+}
+
+// 验证 API Key 端点
+function handleVerifyKey(request, env) {
+  const authResult = authenticateRequest(request, env);
+
+  return new Response(JSON.stringify({
+    valid: authResult.success,
+    message: authResult.success ? 'API key is valid' : authResult.message
+  }), {
+    headers: { 
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    }
+  });
+}
 
 // OpenAI-compatible 图片生成端点
 async function handleOpenAIImageGeneration(request) {
@@ -118,7 +204,6 @@ async function handleOpenAIImageGeneration(request) {
       const candidate = geminiResponse.candidates[0];
       if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
         const text = candidate.content.parts[0].text;
-        // 修复：使用正确的正则表达式转义
         const regex = /!\[.*?\]\((data:image\/[^;]+;base64,([^)]+))\)/;
         const match = text.match(regex);
         if (match) {
@@ -351,7 +436,10 @@ function getHTML() {
       color: #555;
       font-weight: 600;
     }
-    input[type="text"], textarea, select {
+    input[type="text"],
+    input[type="password"],
+    textarea,
+    select {
       width: 100%;
       padding: 12px;
       border: 2px solid #e0e0e0;
@@ -359,7 +447,10 @@ function getHTML() {
       font-size: 14px;
       transition: border-color 0.3s;
     }
-    input[type="text"]:focus, textarea:focus, select:focus {
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    textarea:focus,
+    select:focus {
       outline: none;
       border-color: #667eea;
     }
@@ -395,6 +486,36 @@ function getHTML() {
       opacity: 0.6;
       cursor: not-allowed;
       transform: none;
+    }
+    .api-key-section {
+      background: #fff3cd;
+      border: 2px solid #ffc107;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+    .api-key-section h3 {
+      color: #856404;
+      margin-bottom: 10px;
+      font-size: 1rem;
+    }
+    .api-key-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #6c757d;
+    }
+    .status-indicator.valid {
+      background: #28a745;
+    }
+    .status-indicator.invalid {
+      background: #dc3545;
     }
     .api-docs {
       background: #f8f9fa;
@@ -514,15 +635,30 @@ function getHTML() {
       <h1>🔧 API 逆向工程輸出站</h1>
       <p>Gemini 3 Pro Image Preview - 完整 API 請求/響應分析</p>
       <div>
+        <span class="api-badge">🔐 API Key Protected</span>
         <span class="api-badge">✅ OpenAI Compatible</span>
         <span class="api-badge">✅ REST API</span>
-        <span class="api-badge">✅ Web UI</span>
       </div>
     </div>
 
     <div class="main-grid">
       <div class="card input-section">
         <h2>📝 生成設定</h2>
+
+        <!-- API Key Section -->
+        <div class="api-key-section">
+          <h3>🔐 API Key（可選）</h3>
+          <input 
+            type="password" 
+            id="apiKey" 
+            placeholder="輸入您的 API Key（如果需要）"
+          >
+          <div class="api-key-status">
+            <div class="status-indicator" id="keyStatus"></div>
+            <span id="keyStatusText">未驗證</span>
+          </div>
+        </div>
+
         <form id="generateForm">
           <div class="form-group">
             <label for="prompt">圖片描述 (Prompt)</label>
@@ -567,6 +703,9 @@ function getHTML() {
           <p style="margin-bottom: 10px;">此服務提供 OpenAI 兼容的 API 端點：</p>
           <p><strong>POST</strong> <code>/v1/images/generations</code></p>
           <p><strong>GET</strong> <code>/v1/models</code></p>
+          <p style="margin-top: 10px; font-size: 12px; color: #666;">
+            💡 支持多種 API Key 傳遞方式
+          </p>
         </div>
       </div>
 
@@ -595,12 +734,70 @@ function getHTML() {
   </div>
 
   <script>
+    // API Key 管理
+    const apiKeyInput = document.getElementById('apiKey');
+    const keyStatus = document.getElementById('keyStatus');
+    const keyStatusText = document.getElementById('keyStatusText');
+
+    // 从 localStorage 加载 API Key
+    const savedApiKey = localStorage.getItem('apiKey');
+    if (savedApiKey) {
+      apiKeyInput.value = savedApiKey;
+      verifyApiKey(savedApiKey);
+    }
+
+    // API Key 输入变化时
+    apiKeyInput.addEventListener('change', async (e) => {
+      const apiKey = e.target.value;
+      if (apiKey) {
+        localStorage.setItem('apiKey', apiKey);
+        await verifyApiKey(apiKey);
+      } else {
+        localStorage.removeItem('apiKey');
+        keyStatus.className = 'status-indicator';
+        keyStatusText.textContent = '未驗證';
+      }
+    });
+
+    // 验证 API Key
+    async function verifyApiKey(apiKey) {
+      try {
+        const response = await fetch('/api/verify-key', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + apiKey
+          }
+        });
+
+        const data = await response.json();
+
+        if (data.valid) {
+          keyStatus.className = 'status-indicator valid';
+          keyStatusText.textContent = '✅ 有效';
+        } else {
+          keyStatus.className = 'status-indicator invalid';
+          keyStatusText.textContent = '❌ 無效';
+        }
+      } catch (error) {
+        keyStatus.className = 'status-indicator';
+        keyStatusText.textContent = '⚠️ 無需驗證';
+      }
+    }
+
+    // 获取 API Key
+    function getApiKey() {
+      return apiKeyInput.value || localStorage.getItem('apiKey') || '';
+    }
+
+    // Temperature 滑桿
     const tempSlider = document.getElementById('temperature');
     const tempValue = document.getElementById('tempValue');
     tempSlider.addEventListener('input', (e) => {
       tempValue.textContent = e.target.value;
     });
 
+    // Tab 切換
     document.querySelectorAll('.tab').forEach(tab => {
       tab.addEventListener('click', () => {
         const tabName = tab.dataset.tab;
@@ -611,6 +808,7 @@ function getHTML() {
       });
     });
 
+    // 表單提交
     document.getElementById('generateForm').addEventListener('submit', async (e) => {
       e.preventDefault();
 
@@ -618,6 +816,7 @@ function getHTML() {
       const imageSize = document.getElementById('imageSize').value;
       const temperature = parseFloat(document.getElementById('temperature').value);
       const generateBtn = document.getElementById('generateBtn');
+      const apiKey = getApiKey();
 
       generateBtn.disabled = true;
       generateBtn.textContent = '⏳ 生成中...';
@@ -625,14 +824,28 @@ function getHTML() {
       showLoading();
 
       try {
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+
+        // 添加 API Key（如果有）
+        if (apiKey) {
+          headers['Authorization'] = 'Bearer ' + apiKey;
+        }
+
         const response = await fetch('/api/generate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: headers,
           body: JSON.stringify({ prompt, imageSize, temperature })
         });
 
         const data = await response.json();
-        displayResults(data);
+
+        if (response.status === 401) {
+          showError('❌ API Key 無效或缺失。請檢查您的 API Key 設定。');
+        } else {
+          displayResults(data);
+        }
 
       } catch (error) {
         showError(error.message);
