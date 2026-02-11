@@ -2,7 +2,16 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // 处理 API 请求
+    // OpenAI-compatible API endpoints
+    if (url.pathname === '/v1/images/generations' && request.method === 'POST') {
+      return await handleOpenAIImageGeneration(request);
+    }
+
+    if (url.pathname === '/v1/models' && request.method === 'GET') {
+      return handleModelsEndpoint();
+    }
+
+    // 原有的 API 端點
     if (url.pathname === '/api/generate' && request.method === 'POST') {
       return await handleGenerate(request);
     }
@@ -14,15 +23,177 @@ export default {
   }
 };
 
+// OpenAI-compatible 图片生成端点
+async function handleOpenAIImageGeneration(request) {
+  try {
+    const body = await request.json();
+
+    // 解析 OpenAI 格式的请求
+    const {
+      prompt,
+      n = 1,
+      size = "1024x1024",
+      response_format = "b64_json",
+      model = "gemini-3-pro-image-preview"
+    } = body;
+
+    // 验证必需参数
+    if (!prompt) {
+      return new Response(JSON.stringify({
+        error: {
+          message: "Missing required parameter: 'prompt'",
+          type: "invalid_request_error",
+          param: "prompt",
+          code: null
+        }
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // 转换尺寸格式 (OpenAI -> Gemini)
+    const sizeMap = {
+      "1024x1024": "1K",
+      "2048x2048": "2K",
+      "4096x4096": "4K"
+    };
+    const geminiSize = sizeMap[size] || "2K";
+
+    // 调用 Gemini API
+    const apiUrl = "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent";
+
+    const geminiRequest = {
+      contents: [{
+        role: "user",
+        parts: [{
+          text: `Generate an image: ${prompt}. Image size: ${geminiSize}.`
+        }]
+      }],
+      generationConfig: {
+        temperature: 1.0,
+        topP: 0.95,
+        maxOutputTokens: 8192
+      }
+    };
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      body: JSON.stringify(geminiRequest)
+    });
+
+    const geminiResponse = await response.json();
+
+    // 提取图片数据
+    let imageData = null;
+    if (response.ok && geminiResponse.candidates && geminiResponse.candidates[0]) {
+      const candidate = geminiResponse.candidates[0];
+      if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
+        const text = candidate.content.parts[0].text;
+        const match = text.match(/!\[.*?\]\((data:image\/[^;]+;base64,([^)]+))\)/);
+        if (match) {
+          imageData = {
+            fullDataUrl: match[1], // data:image/jpeg;base64,...
+            base64Only: match[2]   // 仅 Base64 部分
+          };
+        }
+      }
+    }
+
+    // 转换为 OpenAI 格式的响应
+    if (imageData) {
+      const openAIResponse = {
+        created: Math.floor(Date.now() / 1000),
+        data: []
+      };
+
+      // 根据 response_format 返回不同格式
+      for (let i = 0; i < n; i++) {
+        if (response_format === "b64_json") {
+          openAIResponse.data.push({
+            b64_json: imageData.base64Only
+          });
+        } else if (response_format === "url") {
+          // 返回 data URL（因为我们没有实际的托管 URL）
+          openAIResponse.data.push({
+            url: imageData.fullDataUrl
+          });
+        }
+      }
+
+      return new Response(JSON.stringify(openAIResponse), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    } else {
+      // API 调用失败
+      return new Response(JSON.stringify({
+        error: {
+          message: geminiResponse.error?.message || "Failed to generate image",
+          type: "api_error",
+          param: null,
+          code: response.status
+        }
+      }), {
+        status: response.status || 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+  } catch (error) {
+    return new Response(JSON.stringify({
+      error: {
+        message: error.message,
+        type: "server_error",
+        param: null,
+        code: null
+      }
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+// OpenAI-compatible 模型列表端点
+function handleModelsEndpoint() {
+  const models = {
+    object: "list",
+    data: [
+      {
+        id: "gemini-3-pro-image-preview",
+        object: "model",
+        created: 1677610602,
+        owned_by: "google",
+        permission: [],
+        root: "gemini-3-pro-image-preview",
+        parent: null
+      }
+    ]
+  };
+
+  return new Response(JSON.stringify(models), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    }
+  });
+}
+
+// 原有的生成函数（保持不变）
 async function handleGenerate(request) {
   try {
     const body = await request.json();
     const { prompt, imageSize = "2K", temperature = 1.0 } = body;
 
-    // API 请求配置 - 使用正确的 Gemini API 格式
     const apiUrl = "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent";
 
-    // 正确的 Gemini API 请求格式
     const apiRequest = {
       contents: [{
         role: "user",
@@ -39,7 +210,6 @@ async function handleGenerate(request) {
 
     const startTime = Date.now();
 
-    // 调用目标 API
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -52,27 +222,23 @@ async function handleGenerate(request) {
     const responseData = await response.json();
     const duration = Date.now() - startTime;
 
-    // 提取图片数据（如果有）
     let extractedImageData = null;
     if (response.ok && responseData.candidates && responseData.candidates[0]) {
       const candidate = responseData.candidates[0];
       if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
         const text = candidate.content.parts[0].text;
-
-        // 尝试从 Markdown 格式中提取 Base64 图片
         const match = text.match(/!\[.*?\]\((data:image\/[^;]+;base64,[^)]+)\)/);
         if (match) {
-          extractedImageData = match[1]; // 完整的 data:image/jpeg;base64,... URL
+          extractedImageData = match[1];
         }
       }
     }
 
-    // 返回完整的 API 信息
     return new Response(JSON.stringify({
       success: response.ok,
       status: response.status,
       duration: duration,
-      imageData: extractedImageData, // 添加提取的图片数据
+      imageData: extractedImageData,
       request: {
         url: apiUrl,
         method: 'POST',
@@ -107,7 +273,7 @@ function getHTML() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>API 逆向工程輸出站 - Gemini 3 Pro Image</title>
+  <title>API 逆向工程輸出站 - OpenAI Compatible</title>
   <style>
     * {
       margin: 0;
@@ -142,6 +308,15 @@ function getHTML() {
     .header p {
       font-size: 1.1rem;
       opacity: 0.9;
+    }
+
+    .api-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.2);
+      padding: 5px 15px;
+      border-radius: 20px;
+      margin: 5px;
+      font-size: 0.9rem;
     }
 
     .main-grid {
@@ -241,6 +416,26 @@ function getHTML() {
       opacity: 0.6;
       cursor: not-allowed;
       transform: none;
+    }
+
+    .api-docs {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 15px;
+      margin-top: 20px;
+      font-size: 13px;
+    }
+
+    .api-docs h3 {
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    .api-docs code {
+      background: #e9ecef;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
     }
 
     .output-section h2 {
@@ -392,6 +587,11 @@ function getHTML() {
     <div class="header">
       <h1>🔧 API 逆向工程輸出站</h1>
       <p>Gemini 3 Pro Image Preview - 完整 API 請求/響應分析</p>
+      <div>
+        <span class="api-badge">✅ OpenAI Compatible</span>
+        <span class="api-badge">✅ REST API</span>
+        <span class="api-badge">✅ Web UI</span>
+      </div>
     </div>
 
     <div class="main-grid">
@@ -436,6 +636,17 @@ function getHTML() {
             🚀 生成圖片並分析 API
           </button>
         </form>
+
+        <!-- OpenAI API 使用說明 -->
+        <div class="api-docs">
+          <h3>🔌 OpenAI Compatible API</h3>
+          <p style="margin-bottom: 10px;">此服務提供 OpenAI 兼容的 API 端點：</p>
+          <p><strong>POST</strong> <code>/v1/images/generations</code></p>
+          <p><strong>GET</strong> <code>/v1/models</code></p>
+          <p style="margin-top: 10px; font-size: 12px; color: #666;">
+            可用於任何支持 OpenAI API 的應用程序
+          </p>
+        </div>
       </div>
 
       <!-- 輸出區域 -->
@@ -447,6 +658,7 @@ function getHTML() {
           <button class="tab" data-tab="info">API 資訊</button>
           <button class="tab" data-tab="request">請求內容</button>
           <button class="tab" data-tab="response">響應內容</button>
+          <button class="tab" data-tab="openai">OpenAI 格式</button>
         </div>
 
         <div id="outputContainer">
@@ -459,6 +671,60 @@ function getHTML() {
           <div class="tab-content" data-content="info"></div>
           <div class="tab-content" data-content="request"></div>
           <div class="tab-content" data-content="response"></div>
+          <div class="tab-content" data-content="openai">
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+              <h3 style="margin-bottom: 15px;">📘 OpenAI API 使用示例</h3>
+
+              <h4 style="margin: 15px 0 10px 0;">Python (OpenAI SDK)</h4>
+              <div class="json-viewer">
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="${window.location.origin}/v1"
+)
+
+response = client.images.generate(
+    model="gemini-3-pro-image-preview",
+    prompt="A beautiful sunset over mountains",
+    n=1,
+    size="1024x1024",
+    response_format="b64_json"
+)
+
+image_data = response.data[0].b64_json
+              </div>
+
+              <h4 style="margin: 15px 0 10px 0;">cURL</h4>
+              <div class="json-viewer">
+curl ${window.location.origin}/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A beautiful sunset over mountains",
+    "n": 1,
+    "size": "1024x1024",
+    "response_format": "b64_json"
+  }'
+              </div>
+
+              <h4 style="margin: 15px 0 10px 0;">JavaScript (Fetch)</h4>
+              <div class="json-viewer">
+const response = await fetch("${window.location.origin}/v1/images/generations", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    prompt: "A beautiful sunset over mountains",
+    n: 1,
+    size: "1024x1024",
+    response_format: "b64_json"
+  })
+});
+
+const data = await response.json();
+const base64Image = data.data[0].b64_json;
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -497,7 +763,6 @@ function getHTML() {
       generateBtn.disabled = true;
       generateBtn.textContent = '⏳ 生成中...';
 
-      // 顯示 loading
       showLoading();
 
       try {
@@ -574,10 +839,36 @@ function getHTML() {
       \`;
       document.querySelector('[data-content="response"]').innerHTML = responseHtml;
 
+      // OpenAI 格式示例
+      if (data.imageData) {
+        const base64Match = data.imageData.match(/base64,(.+)/);
+        const base64Only = base64Match ? base64Match[1] : '';
+
+        const openAIFormat = {
+          created: Math.floor(Date.now() / 1000),
+          data: [{
+            b64_json: base64Only.substring(0, 100) + '...' // 縮短顯示
+          }]
+        };
+
+        const openaiHtml = \`
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 15px;">
+            <h3 style="margin-bottom: 10px;">✅ OpenAI 兼容格式響應</h3>
+            <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+              此 API 可通過 <code>/v1/images/generations</code> 端點以 OpenAI 格式調用
+            </p>
+          </div>
+          <div class="json-viewer">\${syntaxHighlight(JSON.stringify(openAIFormat, null, 2))}</div>
+          <p style="margin-top: 15px; color: #666; font-size: 13px;">
+            💡 Base64 數據已截斷顯示，實際響應包含完整圖片數據
+          </p>
+        \`;
+        document.querySelector('[data-content="openai"]').innerHTML = openaiHtml;
+      }
+
       // 圖片結果
       let imageHtml = '';
       if (data.success && data.imageData) {
-        // 使用服務器端提取的圖片數據
         imageHtml = \`
           <div class="image-result">
             <img src="\${data.imageData}" alt="Generated Image" />
