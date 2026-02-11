@@ -1,607 +1,913 @@
-// Cloudflare Worker - AI Media Generation API
-// Author: kinai9661
-// Date: 2026-02-11
-
-addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request))
-})
-
-async function handleRequest(request) {
-  const url = new URL(request.url)
-  const path = url.pathname
-
-  if (request.method === 'OPTIONS') {
-    return handleCORS()
-  }
-
-  try {
-    if (path === '/' && request.method === 'GET') {
-      return new Response(getHTML(), {
-        headers: { 
-          'Content-Type': 'text/html;charset=UTF-8',
-          'Cache-Control': 'public, max-age=3600'
-        }
-      })
-    }
-
-    if (path === '/api/image/generate' && request.method === 'POST') {
-      return handleGeminiImage(request)
-    }
-
-    if (path === '/api/image/pollinations' && request.method === 'POST') {
-      return handlePollinationsImage(request)
-    }
-
-    if (path === '/api/text2video' && request.method === 'POST') {
-      return handleText2Video(request)
-    }
-
-    if (path.startsWith('/api/text2video/status/') && request.method === 'GET') {
-      const taskId = path.split('/').pop()
-      return handleVideoStatus(taskId)
-    }
-
-    if (path === '/health' && request.method === 'GET') {
-      return jsonResponse({ 
-        status: 'ok', 
-        timestamp: new Date().toISOString(),
-        services: {
-          image_generation: 'gemini-3-pro',
-          video_generation: 'medeo-text2video'
-        }
-      })
-    }
-
-    if (path === '/api/info' && request.method === 'GET') {
-      return jsonResponse({
-        name: 'AI Media Generation API',
-        version: '2.1.0',
-        services: {
-          image: {
-            endpoint: '/api/image/generate',
-            model: 'gemini-3-pro-image',
-            provider: 'appmedo'
-          },
-          video: {
-            endpoint: '/api/text2video',
-            model: 'medeo-text2video',
-            provider: 'appmedo'
-          }
-        }
-      })
-    }
-
-    return new Response('404 Not Found', { 
-      status: 404,
-      headers: { 'Content-Type': 'text/plain' }
-    })
-
-  } catch (error) {
-    console.error('Request handler error:', error)
-    return jsonResponse({
-      error: 'Internal server error',
-      message: error.message
-    }, 500)
-  }
-}
-
-async function handleGeminiImage(request) {
-  try {
-    const body = await request.json()
-    const prompt = body.prompt || ''
-    const width = body.width || 1024
-    const height = body.height || 1024
-
-    if (!prompt || prompt.trim().length === 0) {
-      return jsonResponse({ 
-        error: 'Prompt is required',
-        message: '请提供图片描述'
-      }, 400)
-    }
-
-    console.log('Generating image with Gemini:', prompt)
-
-    const geminiResponse = await fetch(
-      'https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.9,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 2048
-          }
-        })
-      }
-    )
-
-    if (!geminiResponse.ok) {
-      console.error('Gemini API error:', geminiResponse.status)
-      return handlePollinationsFallback(prompt, width, height)
-    }
-
-    const result = await geminiResponse.json()
-    let imageUrl = null
-    let imageData = null
-
-    if (result.candidates && result.candidates[0]) {
-      const candidate = result.candidates[0]
-
-      if (candidate.content && candidate.content.parts) {
-        for (const part of candidate.content.parts) {
-          if (part.inlineData && part.inlineData.data) {
-            imageData = part.inlineData.data
-            const mimeType = part.inlineData.mimeType || 'image/png'
-            imageUrl = 'data:' + mimeType + ';base64,' + imageData
-            break
-          } else if (part.fileData && part.fileData.fileUri) {
-            imageUrl = part.fileData.fileUri
-            break
-          }
-        }
-      }
-    }
-
-    if (!imageUrl) {
-      return handlePollinationsFallback(prompt, width, height)
-    }
-
-    return jsonResponse({
-      success: true,
-      image_url: imageUrl,
-      prompt: prompt,
-      model: 'gemini-3-pro-image',
-      width: width,
-      height: height,
-      provider: 'appmedo'
-    })
-
-  } catch (error) {
-    console.error('Error:', error)
+export default {
+  async fetch(request, env, ctx) {
     try {
-      const body = await request.clone().json()
-      return handlePollinationsFallback(body.prompt, body.width || 1024, body.height || 1024)
-    } catch (e) {
-      return jsonResponse({
-        error: 'Image generation failed',
-        message: error.message
-      }, 500)
+      const url = new URL(request.url);
+
+      // CORS 预检请求
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
+          }
+        });
+      }
+
+      // API Key 验证（仅对 API 端点生效）
+      if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/api/')) {
+        const authResult = authenticateRequest(request, env);
+        if (!authResult.success) {
+          return new Response(JSON.stringify({
+            error: {
+              message: authResult.message,
+              type: "authentication_error",
+              code: "invalid_api_key"
+            }
+          }), {
+            status: 401,
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*'
+            }
+          });
+        }
+      }
+
+      // OpenAI-compatible API endpoints
+      if (url.pathname === '/v1/images/generations' && request.method === 'POST') {
+        return await handleOpenAIImageGeneration(request);
+      }
+
+      if (url.pathname === '/v1/models' && request.method === 'GET') {
+        return handleModelsEndpoint();
+      }
+
+      // 原有的 API 端點
+      if (url.pathname === '/api/generate' && request.method === 'POST') {
+        return await handleGenerate(request);
+      }
+
+      // API Key 管理端点
+      if (url.pathname === '/api/verify-key' && request.method === 'POST') {
+        return handleVerifyKey(request, env);
+      }
+
+      // 返回 HTML UI
+      return new Response(getHTML(), {
+        headers: { 'Content-Type': 'text/html;charset=UTF-8' }
+      });
+
+    } catch (error) {
+      console.error('Worker Error:', error);
+      return new Response(JSON.stringify({
+        error: {
+          message: error.message,
+          stack: error.stack,
+          type: 'worker_error'
+        }
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
   }
+};
+
+// API Key 验证函数
+function authenticateRequest(request, env) {
+  // 如果没有设置 API_KEY 环境变量，跳过验证（开发模式）
+  const requiredKey = env?.API_KEY;
+  if (!requiredKey) {
+    return { success: true };
+  }
+
+  // 从多个位置尝试获取 API Key
+  let providedKey = null;
+
+  // 1. Authorization header (Bearer token)
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    providedKey = authHeader.substring(7);
+  }
+
+  // 2. X-API-Key header
+  if (!providedKey) {
+    providedKey = request.headers.get('X-API-Key');
+  }
+
+  // 3. Query parameter
+  if (!providedKey) {
+    const url = new URL(request.url);
+    providedKey = url.searchParams.get('api_key');
+  }
+
+  // 验证 API Key
+  if (!providedKey) {
+    return {
+      success: false,
+      message: 'Missing API key. Please provide via Authorization header, X-API-Key header, or api_key query parameter.'
+    };
+  }
+
+  if (providedKey !== requiredKey) {
+    return {
+      success: false,
+      message: 'Invalid API key.'
+    };
+  }
+
+  return { success: true };
 }
 
-async function handlePollinationsFallback(prompt, width, height) {
-  const encodedPrompt = encodeURIComponent(prompt)
-  const imageUrl = 'https://image.pollinations.ai/prompt/' + encodedPrompt + '?width=' + width + '&height=' + height + '&model=flux&nologo=true'
+// 验证 API Key 端点
+function handleVerifyKey(request, env) {
+  const authResult = authenticateRequest(request, env);
 
-  return jsonResponse({
-    success: true,
-    image_url: imageUrl,
-    prompt: prompt,
-    model: 'pollinations-flux',
-    width: width,
-    height: height,
-    provider: 'pollinations',
-    note: 'Using fallback API'
-  })
+  return new Response(JSON.stringify({
+    valid: authResult.success,
+    message: authResult.success ? 'API key is valid' : authResult.message
+  }), {
+    headers: { 
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    }
+  });
 }
 
-async function handlePollinationsImage(request) {
+// OpenAI-compatible 图片生成端点
+async function handleOpenAIImageGeneration(request) {
   try {
-    const body = await request.json()
-    const prompt = body.prompt || ''
-    const width = body.width || 1024
-    const height = body.height || 1024
+    const body = await request.json();
+
+    const {
+      prompt,
+      n = 1,
+      size = "1024x1024",
+      response_format = "b64_json",
+      model = "gemini-3-pro-image-preview"
+    } = body;
 
     if (!prompt) {
-      return jsonResponse({ error: 'Prompt is required' }, 400)
-    }
-
-    const encodedPrompt = encodeURIComponent(prompt)
-    const imageUrl = 'https://image.pollinations.ai/prompt/' + encodedPrompt + '?width=' + width + '&height=' + height + '&model=flux&nologo=true'
-
-    return jsonResponse({
-      success: true,
-      image_url: imageUrl,
-      prompt: prompt,
-      model: 'pollinations-flux',
-      width: width,
-      height: height,
-      provider: 'pollinations'
-    })
-
-  } catch (error) {
-    return jsonResponse({
-      error: 'Failed',
-      message: error.message
-    }, 500)
-  }
-}
-
-async function handleText2Video(request) {
-  try {
-    const body = await request.json()
-    const text = body.text || ''
-    const duration = body.duration || 10
-    const aspect_ratio = body.aspect_ratio || '16:9'
-    const style = body.style || 'default'
-
-    if (!text || text.trim().length === 0) {
-      return jsonResponse({ 
-        error: 'Text is required'
-      }, 400)
-    }
-
-    if (text.length > 500) {
-      return jsonResponse({ 
-        error: 'Text too long'
-      }, 400)
-    }
-
-    const medeoResponse = await fetch(
-      'https://api-integrations.appmedo.com/app-7r29gu4xs001/api-6LeB8Qe4rWGY/v1/videos/text2video',
-      {
-        method: 'POST',
-        headers: {
+      return new Response(JSON.stringify({
+        error: {
+          message: "Missing required parameter: 'prompt'",
+          type: "invalid_request_error",
+          param: "prompt",
+          code: null
+        }
+      }), {
+        status: 400,
+        headers: { 
           'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0'
-        },
-        body: JSON.stringify({
-          prompt: text,
-          duration: duration,
-          aspect_ratio: aspect_ratio,
-          style: style
-        })
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+
+    const sizeMap = {
+      "1024x1024": "1K",
+      "2048x2048": "2K",
+      "4096x4096": "4K"
+    };
+    const geminiSize = sizeMap[size] || "2K";
+
+    const apiUrl = "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent";
+
+    const geminiRequest = {
+      contents: [{
+        role: "user",
+        parts: [{
+          text: `Generate an image: ${prompt}. Image size: ${geminiSize}.`
+        }]
+      }],
+      generationConfig: {
+        temperature: 1.0,
+        topP: 0.95,
+        maxOutputTokens: 8192
       }
-    )
+    };
 
-    if (!medeoResponse.ok) {
-      return jsonResponse({
-        error: 'API request failed',
-        status: medeoResponse.status
-      }, medeoResponse.status)
-    }
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      body: JSON.stringify(geminiRequest)
+    });
 
-    const result = await medeoResponse.json()
+    const geminiResponse = await response.json();
 
-    return jsonResponse({
-      success: true,
-      task_id: result.task_id || result.id || generateTaskId(),
-      status: result.status || 'processing',
-      video_url: result.video_url || null,
-      estimated_time: result.estimated_time || 60
-    })
-
-  } catch (error) {
-    return jsonResponse({
-      error: 'Failed',
-      message: error.message
-    }, 500)
-  }
-}
-
-async function handleVideoStatus(taskId) {
-  try {
-    if (!taskId) {
-      return jsonResponse({ error: 'Task ID required' }, 400)
-    }
-
-    const statusResponse = await fetch(
-      'https://api-integrations.appmedo.com/app-7r29gu4xs001/api-6LeB8Qe4rWGY/v1/videos/status/' + taskId,
-      {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0'
+    let imageData = null;
+    if (response.ok && geminiResponse.candidates && geminiResponse.candidates[0]) {
+      const candidate = geminiResponse.candidates[0];
+      if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
+        const text = candidate.content.parts[0].text;
+        const regex = /!\[.*?\]\((data:image\/[^;]+;base64,([^)]+))\)/;
+        const match = text.match(regex);
+        if (match) {
+          imageData = {
+            fullDataUrl: match[1],
+            base64Only: match[2]
+          };
         }
       }
-    )
-
-    if (!statusResponse.ok) {
-      if (statusResponse.status === 404) {
-        return jsonResponse({
-          success: false,
-          task_id: taskId,
-          status: 'not_found'
-        }, 404)
-      }
-      return jsonResponse({
-        error: 'Status check failed'
-      }, statusResponse.status)
     }
 
-    const result = await statusResponse.json()
+    if (imageData) {
+      const openAIResponse = {
+        created: Math.floor(Date.now() / 1000),
+        data: []
+      };
 
-    return jsonResponse({
-      success: true,
-      task_id: taskId,
-      status: result.status || 'unknown',
-      progress: result.progress || 0,
-      video_url: result.video_url || null
-    })
+      for (let i = 0; i < n; i++) {
+        if (response_format === "b64_json") {
+          openAIResponse.data.push({
+            b64_json: imageData.base64Only
+          });
+        } else if (response_format === "url") {
+          openAIResponse.data.push({
+            url: imageData.fullDataUrl
+          });
+        }
+      }
+
+      return new Response(JSON.stringify(openAIResponse), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    } else {
+      return new Response(JSON.stringify({
+        error: {
+          message: geminiResponse.error?.message || "Failed to generate image",
+          type: "api_error",
+          param: null,
+          code: response.status
+        }
+      }), {
+        status: response.status || 500,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
 
   } catch (error) {
-    return jsonResponse({
-      error: 'Failed',
-      message: error.message
-    }, 500)
+    console.error('OpenAI API Error:', error);
+    return new Response(JSON.stringify({
+      error: {
+        message: error.message,
+        type: "server_error",
+        param: null,
+        code: null
+      }
+    }), {
+      status: 500,
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
   }
 }
 
-function generateTaskId() {
-  return 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-}
+function handleModelsEndpoint() {
+  const models = {
+    object: "list",
+    data: [
+      {
+        id: "gemini-3-pro-image-preview",
+        object: "model",
+        created: 1677610602,
+        owned_by: "google",
+        permission: [],
+        root: "gemini-3-pro-image-preview",
+        parent: null
+      }
+    ]
+  };
 
-function handleCORS() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '86400'
-    }
-  })
-}
-
-function jsonResponse(data, status) {
-  status = status || 200
-  return new Response(JSON.stringify(data, null, 2), {
-    status: status,
+  return new Response(JSON.stringify(models), {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*'
     }
-  })
+  });
+}
+
+async function handleGenerate(request) {
+  try {
+    const body = await request.json();
+    const { prompt, imageSize = "2K", temperature = 1.0 } = body;
+
+    const apiUrl = "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent";
+
+    const apiRequest = {
+      contents: [{
+        role: "user",
+        parts: [{
+          text: `Generate an image: ${prompt}. Image size: ${imageSize}. Temperature: ${temperature}`
+        }]
+      }],
+      generationConfig: {
+        temperature: temperature,
+        topP: 0.95,
+        maxOutputTokens: 8192
+      }
+    };
+
+    const startTime = Date.now();
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      body: JSON.stringify(apiRequest)
+    });
+
+    const responseData = await response.json();
+    const duration = Date.now() - startTime;
+
+    let extractedImageData = null;
+    if (response.ok && responseData.candidates && responseData.candidates[0]) {
+      const candidate = responseData.candidates[0];
+      if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
+        const text = candidate.content.parts[0].text;
+        const regex = /!\[.*?\]\((data:image\/[^;]+;base64,[^)]+)\)/;
+        const match = text.match(regex);
+        if (match) {
+          extractedImageData = match[1];
+        }
+      }
+    }
+
+    return new Response(JSON.stringify({
+      success: response.ok,
+      status: response.status,
+      duration: duration,
+      imageData: extractedImageData,
+      request: {
+        url: apiUrl,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: apiRequest
+      },
+      response: responseData
+    }), {
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+
+  } catch (error) {
+    console.error('Generate API Error:', error);
+    return new Response(JSON.stringify({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    }), {
+      status: 500,
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  }
 }
 
 function getHTML() {
   return `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Media Generator</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;padding:20px}
-.container{max-width:1000px;margin:0 auto;background:rgba(255,255,255,0.98);border-radius:24px;padding:50px;box-shadow:0 25px 70px rgba(0,0,0,0.3)}
-h1{font-size:3em;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:10px}
-.subtitle{color:#666;margin-bottom:30px;font-size:1.2em}
-.tabs{display:flex;gap:10px;margin-bottom:30px;border-bottom:2px solid #e0e0e0}
-.tab{padding:15px 30px;background:none;border:none;border-bottom:3px solid transparent;font-size:16px;font-weight:600;cursor:pointer;color:#666}
-.tab:hover{color:#667eea}
-.tab.active{color:#667eea;border-bottom-color:#667eea}
-.tab-content{display:none}
-.tab-content.active{display:block}
-.form-group{margin-bottom:25px}
-label{display:block;margin-bottom:10px;font-weight:600;color:#333}
-textarea,select{width:100%;padding:16px;border:2px solid #e0e0e0;border-radius:12px;font-size:16px;font-family:inherit}
-textarea{min-height:120px;resize:vertical}
-textarea:focus,select:focus{outline:none;border-color:#667eea}
-.options-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px}
-button.generate-btn{width:100%;padding:20px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:12px;font-size:18px;font-weight:600;cursor:pointer}
-button.generate-btn:hover{transform:translateY(-3px);box-shadow:0 15px 35px rgba(102,126,234,0.4)}
-button.generate-btn:disabled{background:#ccc;cursor:not-allowed}
-.result{margin-top:40px;padding:25px;border-radius:12px;display:none}
-.result.show{display:block}
-.result.success{background:#d4edda;border-left:5px solid #28a745}
-.result.error{background:#f8d7da;border-left:5px solid #dc3545}
-.result.processing{background:#fff3cd;border-left:5px solid #ffc107}
-.result-image{width:100%;border-radius:12px;margin-top:20px;box-shadow:0 10px 30px rgba(0,0,0,0.2)}
-.result-video{width:100%;border-radius:12px;margin-top:20px}
-.progress-bar{width:100%;height:10px;background:rgba(0,0,0,0.1);border-radius:5px;overflow:hidden;margin:20px 0}
-.progress-fill{height:100%;background:linear-gradient(90deg,#667eea,#764ba2);width:0%;transition:width 0.5s}
-.download-btn{margin-top:15px;padding:15px 30px;background:#28a745;color:white;border:none;border-radius:10px;cursor:pointer}
-.spinner{display:inline-block;width:20px;height:20px;border:3px solid rgba(255,255,255,.3);border-radius:50%;border-top-color:#fff;animation:spin 1s infinite;margin-right:10px}
-@keyframes spin{to{transform:rotate(360deg)}}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API 逆向工程輸出站 - OpenAI Compatible</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    .header { text-align: center; color: white; margin-bottom: 30px; }
+    .header h1 {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    .header p { font-size: 1.1rem; opacity: 0.9; }
+    .api-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.2);
+      padding: 5px 15px;
+      border-radius: 20px;
+      margin: 5px;
+      font-size: 0.9rem;
+    }
+    .main-grid {
+      display: grid;
+      grid-template-columns: 400px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+    .input-section { position: sticky; top: 20px; }
+    .input-section h2 { margin-bottom: 20px; color: #333; font-size: 1.5rem; }
+    .form-group { margin-bottom: 20px; }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: #555;
+      font-weight: 600;
+    }
+    input[type="text"],
+    input[type="password"],
+    textarea,
+    select {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.3s;
+    }
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    textarea:focus,
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+      font-family: inherit;
+    }
+    input[type="range"] { width: 100%; }
+    .range-value {
+      display: inline-block;
+      margin-left: 10px;
+      color: #667eea;
+      font-weight: bold;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .api-key-section {
+      background: #fff3cd;
+      border: 2px solid #ffc107;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+    .api-key-section h3 {
+      color: #856404;
+      margin-bottom: 10px;
+      font-size: 1rem;
+    }
+    .api-key-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #6c757d;
+    }
+    .status-indicator.valid {
+      background: #28a745;
+    }
+    .status-indicator.invalid {
+      background: #dc3545;
+    }
+    .api-docs {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 15px;
+      margin-top: 20px;
+      font-size: 13px;
+    }
+    .api-docs h3 { margin-bottom: 10px; color: #333; }
+    .api-docs code {
+      background: #e9ecef;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+    }
+    .output-section h2 { margin-bottom: 20px; color: #333; font-size: 1.5rem; }
+    .output-tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+    .tab {
+      padding: 10px 20px;
+      background: none;
+      border: none;
+      color: #666;
+      font-weight: 600;
+      cursor: pointer;
+      transition: color 0.3s;
+      width: auto;
+    }
+    .tab.active {
+      color: #667eea;
+      border-bottom: 3px solid #667eea;
+      margin-bottom: -2px;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .api-info {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 15px;
+    }
+    .api-info-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    .api-info-label { font-weight: 600; color: #555; }
+    .api-info-value {
+      color: #667eea;
+      font-family: 'Courier New', monospace;
+    }
+    .status-success { color: #10b981; }
+    .status-error { color: #ef4444; }
+    .json-viewer {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border-radius: 8px;
+      padding: 15px;
+      overflow-x: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .image-result { text-align: center; }
+    .image-result img {
+      max-width: 100%;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      margin-top: 15px;
+    }
+    .loading { text-align: center; padding: 40px; color: #667eea; }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .error-message {
+      background: #fee;
+      color: #c33;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+    .success-badge {
+      display: inline-block;
+      background: #10b981;
+      color: white;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+    @media (max-width: 1024px) {
+      .main-grid { grid-template-columns: 1fr; }
+      .input-section { position: static; }
+    }
+  </style>
 </head>
 <body>
-<div class="container">
-<h1>🎨 AI Media Generator</h1>
-<p class="subtitle">Gemini Image + Medeo Video</p>
+  <div class="container">
+    <div class="header">
+      <h1>🔧 API 逆向工程輸出站</h1>
+      <p>Gemini 3 Pro Image Preview - 完整 API 請求/響應分析</p>
+      <div>
+        <span class="api-badge">🔐 API Key Protected</span>
+        <span class="api-badge">✅ OpenAI Compatible</span>
+        <span class="api-badge">✅ REST API</span>
+      </div>
+    </div>
 
-<div class="tabs">
-<button class="tab active" onclick="switchTab('image')">🖼️ Image</button>
-<button class="tab" onclick="switchTab('video')">🎬 Video</button>
-</div>
+    <div class="main-grid">
+      <div class="card input-section">
+        <h2>📝 生成設定</h2>
 
-<div id="imageTab" class="tab-content active">
-<form id="imageForm">
-<div class="form-group">
-<label>Image Description</label>
-<textarea id="imagePrompt" placeholder="A cute cat sitting on a windowsill..." required></textarea>
-</div>
-<div class="options-grid">
-<div class="form-group">
-<label>Width</label>
-<select id="imageWidth">
-<option value="512">512px</option>
-<option value="768">768px</option>
-<option value="1024" selected>1024px</option>
-</select>
-</div>
-<div class="form-group">
-<label>Height</label>
-<select id="imageHeight">
-<option value="512">512px</option>
-<option value="768">768px</option>
-<option value="1024" selected>1024px</option>
-</select>
-</div>
-</div>
-<button type="submit" class="generate-btn" id="imageBtn">Generate Image</button>
-</form>
-<div id="imageResult" class="result"></div>
-</div>
+        <!-- API Key Section -->
+        <div class="api-key-section">
+          <h3>🔐 API Key（可選）</h3>
+          <input 
+            type="password" 
+            id="apiKey" 
+            placeholder="輸入您的 API Key（如果需要）"
+          >
+          <div class="api-key-status">
+            <div class="status-indicator" id="keyStatus"></div>
+            <span id="keyStatusText">未驗證</span>
+          </div>
+        </div>
 
-<div id="videoTab" class="tab-content">
-<form id="videoForm">
-<div class="form-group">
-<label>Video Description</label>
-<textarea id="videoText" placeholder="A dog running on grass..." maxlength="500" required></textarea>
-</div>
-<div class="options-grid">
-<div class="form-group">
-<label>Duration</label>
-<select id="videoDuration">
-<option value="5">5s</option>
-<option value="10" selected>10s</option>
-<option value="15">15s</option>
-</select>
-</div>
-<div class="form-group">
-<label>Aspect Ratio</label>
-<select id="videoAspect">
-<option value="16:9" selected>16:9</option>
-<option value="9:16">9:16</option>
-<option value="1:1">1:1</option>
-</select>
-</div>
-</div>
-<button type="submit" class="generate-btn" id="videoBtn">Generate Video</button>
-</form>
-<div id="videoResult" class="result"></div>
-</div>
+        <form id="generateForm">
+          <div class="form-group">
+            <label for="prompt">圖片描述 (Prompt)</label>
+            <textarea 
+              id="prompt" 
+              placeholder="例如：A futuristic city at sunset with flying cars..."
+              required
+            ></textarea>
+          </div>
 
-</div>
+          <div class="form-group">
+            <label for="imageSize">圖片尺寸</label>
+            <select id="imageSize">
+              <option value="1K">1K (1024px)</option>
+              <option value="2K" selected>2K (2048px)</option>
+              <option value="4K">4K (4096px)</option>
+            </select>
+          </div>
 
-<script>
-let videoTaskId=null,pollInterval=null;
+          <div class="form-group">
+            <label for="temperature">
+              創造性 (Temperature)
+              <span class="range-value" id="tempValue">1.0</span>
+            </label>
+            <input 
+              type="range" 
+              id="temperature" 
+              min="0" 
+              max="2" 
+              step="0.1" 
+              value="1.0"
+            >
+          </div>
 
-function switchTab(tab){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
-  event.target.classList.add('active');
-  document.getElementById(tab+'Tab').classList.add('active');
-}
+          <button type="submit" id="generateBtn">
+            🚀 生成圖片並分析 API
+          </button>
+        </form>
 
-document.getElementById('imageForm').addEventListener('submit',async(e)=>{
-  e.preventDefault();
-  const prompt=document.getElementById('imagePrompt').value;
-  const width=parseInt(document.getElementById('imageWidth').value);
-  const height=parseInt(document.getElementById('imageHeight').value);
-  const btn=document.getElementById('imageBtn');
-  const result=document.getElementById('imageResult');
+        <div class="api-docs">
+          <h3>🔌 OpenAI Compatible API</h3>
+          <p style="margin-bottom: 10px;">此服務提供 OpenAI 兼容的 API 端點：</p>
+          <p><strong>POST</strong> <code>/v1/images/generations</code></p>
+          <p><strong>GET</strong> <code>/v1/models</code></p>
+          <p style="margin-top: 10px; font-size: 12px; color: #666;">
+            💡 支持多種 API Key 傳遞方式
+          </p>
+        </div>
+      </div>
 
-  btn.disabled=true;
-  btn.innerHTML='<span class="spinner"></span> Generating...';
-  result.className='result show processing';
-  result.innerHTML='<div>Generating image with Gemini...</div>';
+      <div class="card output-section">
+        <h2>📊 API 輸出分析</h2>
 
-  try{
-    const res=await fetch('/api/image/generate',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({prompt,width,height})
-    });
-    const data=await res.json();
+        <div class="output-tabs">
+          <button class="tab active" data-tab="image">生成圖片</button>
+          <button class="tab" data-tab="info">API 資訊</button>
+          <button class="tab" data-tab="request">請求內容</button>
+          <button class="tab" data-tab="response">響應內容</button>
+        </div>
 
-    if(!res.ok) throw new Error(data.message||data.error);
+        <div id="outputContainer">
+          <div class="tab-content active" data-content="image">
+            <p style="text-align: center; color: #999; padding: 60px 20px;">
+              👆 填寫左側表單並點擊生成按鈕開始
+            </p>
+          </div>
+          <div class="tab-content" data-content="info"></div>
+          <div class="tab-content" data-content="request"></div>
+          <div class="tab-content" data-content="response"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-    result.className='result show success';
-    result.innerHTML='<div><strong>Success!</strong> Model: '+data.model+'</div>'+
-      '<img src="'+data.image_url+'" class="result-image">'+
-      '<button class="download-btn" onclick="window.open(\''+data.image_url+'\',\'_blank\')">Download</button>';
-  }catch(err){
-    result.className='result show error';
-    result.innerHTML='<div><strong>Error:</strong> '+err.message+'</div>';
-  }finally{
-    btn.disabled=false;
-    btn.innerHTML='Generate Image';
-  }
-});
+  <script>
+    // API Key 管理
+    const apiKeyInput = document.getElementById('apiKey');
+    const keyStatus = document.getElementById('keyStatus');
+    const keyStatusText = document.getElementById('keyStatusText');
 
-document.getElementById('videoForm').addEventListener('submit',async(e)=>{
-  e.preventDefault();
-  const text=document.getElementById('videoText').value;
-  const duration=parseInt(document.getElementById('videoDuration').value);
-  const aspect_ratio=document.getElementById('videoAspect').value;
-  const btn=document.getElementById('videoBtn');
-  const result=document.getElementById('videoResult');
-
-  btn.disabled=true;
-  btn.innerHTML='<span class="spinner"></span> Generating...';
-  result.className='result show processing';
-  result.innerHTML='<div>Generating video...</div><div class="progress-bar"><div id="videoProgress" class="progress-fill"></div></div>';
-
-  try{
-    const res=await fetch('/api/text2video',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text,duration,aspect_ratio})
-    });
-    const data=await res.json();
-
-    if(!res.ok) throw new Error(data.message||data.error);
-
-    videoTaskId=data.task_id;
-    if(data.video_url){
-      showVideo(data.video_url);
-    }else{
-      startVideoPolling(data.task_id);
+    // 从 localStorage 加载 API Key
+    const savedApiKey = localStorage.getItem('apiKey');
+    if (savedApiKey) {
+      apiKeyInput.value = savedApiKey;
+      verifyApiKey(savedApiKey);
     }
-  }catch(err){
-    result.className='result show error';
-    result.innerHTML='<div><strong>Error:</strong> '+err.message+'</div>';
-    btn.disabled=false;
-    btn.innerHTML='Generate Video';
-  }
-});
 
-function startVideoPolling(taskId){
-  let progress=10;
-  pollInterval=setInterval(async()=>{
-    try{
-      const res=await fetch('/api/text2video/status/'+taskId);
-      const data=await res.json();
-
-      if(data.status==='completed'&&data.video_url){
-        clearInterval(pollInterval);
-        showVideo(data.video_url);
-      }else if(data.status==='failed'){
-        clearInterval(pollInterval);
-        document.getElementById('videoResult').className='result show error';
-        document.getElementById('videoResult').innerHTML='<div>Failed</div>';
-        document.getElementById('videoBtn').disabled=false;
-        document.getElementById('videoBtn').innerHTML='Generate Video';
-      }else{
-        progress=Math.min(progress+5,95);
-        const bar=document.getElementById('videoProgress');
-        if(bar) bar.style.width=progress+'%';
+    // API Key 输入变化时
+    apiKeyInput.addEventListener('change', async (e) => {
+      const apiKey = e.target.value;
+      if (apiKey) {
+        localStorage.setItem('apiKey', apiKey);
+        await verifyApiKey(apiKey);
+      } else {
+        localStorage.removeItem('apiKey');
+        keyStatus.className = 'status-indicator';
+        keyStatusText.textContent = '未驗證';
       }
-    }catch(err){
-      console.error(err);
+    });
+
+    // 验证 API Key
+    async function verifyApiKey(apiKey) {
+      try {
+        const response = await fetch('/api/verify-key', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + apiKey
+          }
+        });
+
+        const data = await response.json();
+
+        if (data.valid) {
+          keyStatus.className = 'status-indicator valid';
+          keyStatusText.textContent = '✅ 有效';
+        } else {
+          keyStatus.className = 'status-indicator invalid';
+          keyStatusText.textContent = '❌ 無效';
+        }
+      } catch (error) {
+        keyStatus.className = 'status-indicator';
+        keyStatusText.textContent = '⚠️ 無需驗證';
+      }
     }
-  },3000);
-}
 
-function showVideo(url){
-  const result=document.getElementById('videoResult');
-  const bar=document.getElementById('videoProgress');
-  if(bar) bar.style.width='100%';
+    // 获取 API Key
+    function getApiKey() {
+      return apiKeyInput.value || localStorage.getItem('apiKey') || '';
+    }
 
-  setTimeout(()=>{
-    result.className='result show success';
-    result.innerHTML='<div><strong>Success!</strong></div>'+
-      '<video controls autoplay class="result-video"><source src="'+url+'" type="video/mp4"></video>'+
-      '<button class="download-btn" onclick="window.open(\''+url+'\',\'_blank\')">Download</button>';
-    document.getElementById('videoBtn').disabled=false;
-    document.getElementById('videoBtn').innerHTML='Generate Video';
-  },500);
-}
-</script>
+    // Temperature 滑桿
+    const tempSlider = document.getElementById('temperature');
+    const tempValue = document.getElementById('tempValue');
+    tempSlider.addEventListener('input', (e) => {
+      tempValue.textContent = e.target.value;
+    });
+
+    // Tab 切換
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabName = tab.dataset.tab;
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelector('[data-content="' + tabName + '"]').classList.add('active');
+      });
+    });
+
+    // 表單提交
+    document.getElementById('generateForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const prompt = document.getElementById('prompt').value;
+      const imageSize = document.getElementById('imageSize').value;
+      const temperature = parseFloat(document.getElementById('temperature').value);
+      const generateBtn = document.getElementById('generateBtn');
+      const apiKey = getApiKey();
+
+      generateBtn.disabled = true;
+      generateBtn.textContent = '⏳ 生成中...';
+
+      showLoading();
+
+      try {
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+
+        // 添加 API Key（如果有）
+        if (apiKey) {
+          headers['Authorization'] = 'Bearer ' + apiKey;
+        }
+
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ prompt, imageSize, temperature })
+        });
+
+        const data = await response.json();
+
+        if (response.status === 401) {
+          showError('❌ API Key 無效或缺失。請檢查您的 API Key 設定。');
+        } else {
+          displayResults(data);
+        }
+
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.textContent = '🚀 生成圖片並分析 API';
+      }
+    });
+
+    function showLoading() {
+      const html = '<div class="loading"><div class="spinner"></div><p>正在調用 API 並生成圖片...</p></div>';
+      document.querySelectorAll('.tab-content').forEach(el => el.innerHTML = html);
+    }
+
+    function showError(message) {
+      const html = '<div class="error-message"><strong>❌ 錯誤：</strong> ' + message + '</div>';
+      document.querySelector('[data-content="image"]').innerHTML = html;
+    }
+
+    function displayResults(data) {
+      const statusClass = data.success ? 'status-success' : 'status-error';
+      const infoHtml = '<div class="api-info">' +
+        '<div class="api-info-row"><span class="api-info-label">狀態：</span>' +
+        '<span class="api-info-value ' + statusClass + '">' + data.status + ' ' + (data.success ? '✓' : '✗') + '</span></div>' +
+        '<div class="api-info-row"><span class="api-info-label">響應時間：</span>' +
+        '<span class="api-info-value">' + data.duration + 'ms</span></div>' +
+        '<div class="api-info-row"><span class="api-info-label">圖片數據：</span>' +
+        '<span class="api-info-value">' + (data.imageData ? '✅ 已提取' : '❌ 未找到') + '</span></div>' +
+        '</div>';
+      document.querySelector('[data-content="info"]').innerHTML = infoHtml;
+
+      const requestHtml = '<div class="json-viewer">' + syntaxHighlight(JSON.stringify(data.request, null, 2)) + '</div>';
+      document.querySelector('[data-content="request"]').innerHTML = requestHtml;
+
+      const responseHtml = '<div class="json-viewer">' + syntaxHighlight(JSON.stringify(data.response, null, 2)) + '</div>';
+      document.querySelector('[data-content="response"]').innerHTML = responseHtml;
+
+      let imageHtml = '';
+      if (data.success && data.imageData) {
+        imageHtml = '<div class="image-result">' +
+          '<img src="' + data.imageData + '" alt="Generated Image" />' +
+          '<div class="success-badge">✅ 圖片生成成功</div>' +
+          '<p style="margin-top: 15px; color: #666; font-size: 14px;">圖片已從 Markdown 格式中提取並顯示</p>' +
+          '</div>';
+      } else if (data.success) {
+        imageHtml = '<div class="error-message">⚠️ API 響應成功，但未找到圖片數據。<br>請查看「響應內容」標籤頁獲取完整響應。</div>';
+      } else {
+        imageHtml = '<div class="error-message">❌ API 調用失敗<br><strong>錯誤：</strong>' + 
+          (data.error || '未知錯誤') + '</div>';
+      }
+      document.querySelector('[data-content="image"]').innerHTML = imageHtml;
+    }
+
+    function syntaxHighlight(json) {
+      json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return json.replace(/("([^"]*)"([:]?))/g, '<span style="color:#9cdcfe">$1</span>')
+                .replace(/([:]\s*)(\"[^\"]*\")/g, '$1<span style="color:#ce9178">$2</span>')
+                .replace(/([:]\s*)([0-9.]+)/g, '$1<span style="color:#b5cea8">$2</span>')
+                .replace(/([:]\s*)(true|false)/g, '$1<span style="color:#569cd6">$2</span>')
+                .replace(/([:]\s*)(null)/g, '$1<span style="color:#569cd6">$2</span>');
+    }
+  </script>
 </body>
-</html>`
+</html>`;
 }
