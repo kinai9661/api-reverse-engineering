@@ -1,0 +1,9 @@
+{
+  "name": "api-reverse-engineering",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy worker.js",
+    "dev": "wrangler dev worker.js"
+  }
+}
