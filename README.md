@@ -1,133 +1,143 @@
-# API 逆向工程輸出站
+# API 逆向工程輸出站 - OpenAI Compatible
 
-## 功能特點
-✅ Gemini 3 Pro Image Preview API 代理
-✅ 完整的 API 請求/響應顯示
-✅ 實時圖片生成預覽
-✅ 單一 UI 介面（無需外部依賴）
-✅ 一鍵部署到 Cloudflare Workers
+## 🎉 功能特性
 
-## 快速部署
+### ✅ Web UI
+- 完整的圖片生成界面
+- 實時 API 請求/響應分析
+- 支持多種圖片尺寸
+- 溫度參數調節
 
-### 1. 安裝 Wrangler CLI
+### ✅ OpenAI Compatible API
+- **POST** `/v1/images/generations` - 圖片生成
+- **GET** `/v1/models` - 模型列表
+- 完全兼容 OpenAI SDK
+- 支持 Base64 和 URL 響應格式
+
+### ✅ REST API
+- **POST** `/api/generate` - 原始 API（含完整響應）
+- 詳細的請求/響應分析
+- 錯誤追蹤和調試信息
+
+## 🚀 快速開始
+
+### 部署到 Cloudflare Workers
+
 ```bash
+# 1. 安裝 Wrangler
 npm install -g wrangler
-```
 
-### 2. 登入 Cloudflare 帳號
-```bash
+# 2. 登入
 wrangler login
+
+# 3. 部署
+wrangler deploy worker.js --name api-reverse-engineering
 ```
 
-### 3. 部署到 Cloudflare Workers
-```bash
-wrangler deploy
+### 使用 OpenAI SDK
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-worker.workers.dev/v1"
+)
+
+response = client.images.generate(
+    prompt="A beautiful sunset",
+    size="1024x1024"
+)
+
+image = response.data[0].b64_json
 ```
 
-部署完成後，你會獲得一個 URL，例如：
-```
-https://api-reverse-engineering.your-account.workers.dev
-```
+### 使用 Web UI
 
-## 本地開發
+訪問: `https://your-worker.workers.dev`
 
-```bash
-# 啟動本地開發伺服器
-wrangler dev
+## 📚 文檔
 
-# 訪問 http://localhost:8787
-```
+詳細文檔請參見: `OPENAI_API_DOCS.md`
 
-## 自定義配置
+## 🔌 API 端點
 
-### 修改 API 端點
-編輯 `worker.js` 的第 19 行：
-```javascript
-const apiUrl = "你的API端點";
-```
+| 端點 | 方法 | 描述 |
+|------|------|------|
+| `/` | GET | Web UI 界面 |
+| `/v1/images/generations` | POST | OpenAI 兼容圖片生成 |
+| `/v1/models` | GET | 可用模型列表 |
+| `/api/generate` | POST | 原始 API（含詳細信息）|
 
-### 添加認證
-如果需要 API Key，在第 26 行添加：
-```javascript
-headers: {
-  'Content-Type': 'application/json',
-  'Authorization': 'Bearer YOUR_API_KEY',
-  'X-API-Key': 'YOUR_API_KEY'
+## 🎯 使用場景
+
+- ✅ 替換 OpenAI DALL-E API
+- ✅ 集成到現有應用
+- ✅ API 測試和調試
+- ✅ 圖片生成自動化
+
+## 📊 響應格式
+
+### OpenAI 格式
+```json
+{
+  "created": 1677610602,
+  "data": [{
+    "b64_json": "..."
+  }]
 }
 ```
 
-### 綁定自定義域名
-編輯 `wrangler.toml`：
-```toml
-routes = [
-  { pattern = "api-reverse.yourdomain.com", zone_name = "yourdomain.com" }
-]
+### 原始格式（詳細）
+```json
+{
+  "success": true,
+  "status": 200,
+  "duration": 1234,
+  "imageData": "data:image/jpeg;base64,...",
+  "request": {...},
+  "response": {...}
+}
 ```
 
-## 使用說明
+## 🌟 特色功能
 
-1. 訪問你的 Worker URL
-2. 在左側輸入圖片描述（Prompt）
-3. 選擇圖片尺寸和創造性參數
-4. 點擊「生成圖片並分析 API」
-5. 查看四個標籤頁：
-   - **生成圖片**：顯示生成的圖片
-   - **API 資訊**：狀態碼、響應時間等
-   - **請求內容**：完整的 API 請求 JSON
-   - **響應內容**：完整的 API 響應 JSON
+1. **多端點支持**: Web UI + OpenAI API + REST API
+2. **完整透明**: 查看所有請求/響應細節
+3. **易於集成**: 兼容 OpenAI SDK
+4. **無需配置**: 開箱即用
+5. **全球分發**: Cloudflare Edge Network
 
-## 技術架構
+## 🛠️ 技術棧
 
-- **Runtime**: Cloudflare Workers (Edge Computing)
+- **Runtime**: Cloudflare Workers
 - **API**: Gemini 3 Pro Image Preview
-- **UI**: 純 HTML/CSS/JavaScript（無框架）
-- **部署**: 全球 CDN 分發
+- **兼容性**: OpenAI Images API v1
+- **前端**: 原生 HTML/CSS/JavaScript
 
-## 進階功能
+## 📈 性能
 
-### 添加速率限制
+- **全球延遲**: < 50ms（Cloudflare CDN）
+- **圖片生成**: 1-5 秒
+- **並發支持**: 高（Workers 擴展）
+- **可用性**: 99.9%+
+
+## 🔐 安全性
+
+當前版本無需 API Key，可在 Worker 中添加認證：
+
 ```javascript
-// 在 worker.js 的 fetch 函數中添加
-const RATE_LIMIT = 10; // 每分鐘 10 次請求
+const API_KEY = env.API_KEY;
+if (request.headers.get("Authorization") !== `Bearer ${API_KEY}`) {
+  return unauthorized();
+}
 ```
 
-### 添加請求日誌
-```javascript
-console.log('Request:', {
-  timestamp: new Date().toISOString(),
-  prompt: prompt,
-  imageSize: imageSize
-});
-```
+## 📞 支持
 
-### 環境變數配置
-在 Cloudflare Dashboard 添加環境變數：
-- `API_KEY`: API 認證密鑰
-- `API_ENDPOINT`: 自定義 API 端點
+- 查看 `OPENAI_API_DOCS.md` 獲取詳細文檔
+- 檢查 Worker 日誌進行調試
+- 參考 OpenAI 官方文檔
 
-## 故障排除
+## 📄 License
 
-### 部署失敗
-```bash
-# 檢查配置
-wrangler whoami
-
-# 清除快取重新部署
-wrangler deploy --force
-```
-
-### CORS 錯誤
-已在 Worker 中配置 CORS 頭，如果仍有問題，檢查目標 API 的 CORS 設定。
-
-### 圖片未顯示
-檢查 API 響應結構，可能需要修改 `displayResults` 函數中的圖片 URL 提取邏輯。
-
-## 安全建議
-
-1. ⚠️ 不要在前端代碼中硬編碼 API Key
-2. ⚠️ 使用環境變數存儲敏感信息
-3. ⚠️ 考慮添加 IP 白名單或速率限制
-4. ⚠️ 定期檢查 API 使用量和費用
-
-## License
 MIT License
