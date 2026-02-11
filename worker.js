@@ -52,11 +52,27 @@ async function handleGenerate(request) {
     const responseData = await response.json();
     const duration = Date.now() - startTime;
 
+    // 提取图片数据（如果有）
+    let extractedImageData = null;
+    if (response.ok && responseData.candidates && responseData.candidates[0]) {
+      const candidate = responseData.candidates[0];
+      if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
+        const text = candidate.content.parts[0].text;
+
+        // 尝试从 Markdown 格式中提取 Base64 图片
+        const match = text.match(/!\[.*?\]\((data:image\/[^;]+;base64,[^)]+)\)/);
+        if (match) {
+          extractedImageData = match[1]; // 完整的 data:image/jpeg;base64,... URL
+        }
+      }
+    }
+
     // 返回完整的 API 信息
     return new Response(JSON.stringify({
       success: response.ok,
       status: response.status,
       duration: duration,
+      imageData: extractedImageData, // 添加提取的图片数据
       request: {
         url: apiUrl,
         method: 'POST',
@@ -349,6 +365,17 @@ function getHTML() {
       margin-bottom: 15px;
     }
 
+    .success-badge {
+      display: inline-block;
+      background: #10b981;
+      color: white;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+
     @media (max-width: 1024px) {
       .main-grid {
         grid-template-columns: 1fr;
@@ -527,6 +554,10 @@ function getHTML() {
             <span class="api-info-label">請求 URL：</span>
             <span class="api-info-value" style="word-break: break-all; font-size: 11px;">\${data.request?.url || 'N/A'}</span>
           </div>
+          <div class="api-info-row">
+            <span class="api-info-label">圖片數據：</span>
+            <span class="api-info-value">\${data.imageData ? '✅ 已提取' : '❌ 未找到'}</span>
+          </div>
         </div>
       \`;
       document.querySelector('[data-content="info"]').innerHTML = infoHtml;
@@ -545,44 +576,25 @@ function getHTML() {
 
       // 圖片結果
       let imageHtml = '';
-      if (data.success && data.response) {
-        // 嘗試多種可能的圖片字段提取
-        let imageUrl = null;
-
-        // 方法1: 直接字段
-        imageUrl = data.response.imageUrl || 
-                  data.response.image_url || 
-                  data.response.url ||
-                  data.response.data?.imageUrl;
-
-        // 方法2: Gemini API 标准格式
-        if (!imageUrl && data.response.candidates && data.response.candidates[0]) {
-          const candidate = data.response.candidates[0];
-          if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
-            const part = candidate.content.parts[0];
-            imageUrl = part.text || part.inlineData?.data;
-          }
-        }
-
-        if (imageUrl) {
-          const isBase64 = !imageUrl.startsWith('http');
-          const imgSrc = isBase64 ? \`data:image/png;base64,\${imageUrl}\` : imageUrl;
-          imageHtml = \`
-            <div class="image-result">
-              <img src="\${imgSrc}" alt="Generated Image" />
-              <p style="margin-top: 15px; color: #666;">✅ 圖片生成成功</p>
-            </div>
-          \`;
-        } else {
-          imageHtml = \`
-            <div class="error-message">
-              ⚠️ API 響應成功，但未找到圖片數據。<br>
-              這可能是因為 API 返回的是文本響應而非圖片。<br>
-              請查看「響應內容」標籤頁獲取完整響應。
-            </div>
-            <div class="json-viewer">\${syntaxHighlight(JSON.stringify(data.response, null, 2))}</div>
-          \`;
-        }
+      if (data.success && data.imageData) {
+        // 使用服務器端提取的圖片數據
+        imageHtml = \`
+          <div class="image-result">
+            <img src="\${data.imageData}" alt="Generated Image" />
+            <div class="success-badge">✅ 圖片生成成功</div>
+            <p style="margin-top: 15px; color: #666; font-size: 14px;">
+              圖片已從 Markdown 格式中提取並顯示
+            </p>
+          </div>
+        \`;
+      } else if (data.success) {
+        imageHtml = \`
+          <div class="error-message">
+            ⚠️ API 響應成功，但未找到圖片數據。<br>
+            請查看「響應內容」標籤頁獲取完整響應。
+          </div>
+          <div class="json-viewer" style="max-height: 300px;">\${syntaxHighlight(JSON.stringify(data.response, null, 2))}</div>
+        \`;
       } else {
         imageHtml = \`
           <div class="error-message">
@@ -590,7 +602,7 @@ function getHTML() {
             <strong>錯誤：</strong>\${data.error || data.response?.error?.message || '未知錯誤'}<br>
             <strong>狀態碼：</strong>\${data.status}
           </div>
-          <div class="json-viewer">\${syntaxHighlight(JSON.stringify(data.response || {}, null, 2))}</div>
+          <div class="json-viewer" style="max-height: 300px;">\${syntaxHighlight(JSON.stringify(data.response || {}, null, 2))}</div>
         \`;
       }
       document.querySelector('[data-content="image"]').innerHTML = imageHtml;
