@@ -19,17 +19,21 @@ async function handleGenerate(request) {
     const body = await request.json();
     const { prompt, imageSize = "2K", temperature = 1.0 } = body;
 
-    // API 请求配置
+    // API 请求配置 - 使用正确的 Gemini API 格式
     const apiUrl = "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent";
 
+    // 正确的 Gemini API 请求格式
     const apiRequest = {
-      type: "IMAGE_GENERATOR",
-      model: "gemini-3-pro-image-preview",
-      promptObject: {
-        prompt: prompt,
-        imageSize: imageSize,
+      contents: [{
+        role: "user",
+        parts: [{
+          text: `Generate an image: ${prompt}. Image size: ${imageSize}. Temperature: ${temperature}`
+        }]
+      }],
+      generationConfig: {
         temperature: temperature,
-        topP: 0.95
+        topP: 0.95,
+        maxOutputTokens: 8192
       }
     };
 
@@ -542,12 +546,23 @@ function getHTML() {
       // 圖片結果
       let imageHtml = '';
       if (data.success && data.response) {
-        // 嘗試從多種可能的欄位提取圖片 URL
-        const imageUrl = data.response.imageUrl || 
-                        data.response.image_url || 
-                        data.response.url ||
-                        data.response.data?.imageUrl ||
-                        data.response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        // 嘗試多種可能的圖片字段提取
+        let imageUrl = null;
+
+        // 方法1: 直接字段
+        imageUrl = data.response.imageUrl || 
+                  data.response.image_url || 
+                  data.response.url ||
+                  data.response.data?.imageUrl;
+
+        // 方法2: Gemini API 标准格式
+        if (!imageUrl && data.response.candidates && data.response.candidates[0]) {
+          const candidate = data.response.candidates[0];
+          if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
+            const part = candidate.content.parts[0];
+            imageUrl = part.text || part.inlineData?.data;
+          }
+        }
 
         if (imageUrl) {
           const isBase64 = !imageUrl.startsWith('http');
@@ -561,7 +576,9 @@ function getHTML() {
         } else {
           imageHtml = \`
             <div class="error-message">
-              ⚠️ API 響應成功，但未找到圖片 URL。請檢查響應內容標籤。
+              ⚠️ API 響應成功，但未找到圖片數據。<br>
+              這可能是因為 API 返回的是文本響應而非圖片。<br>
+              請查看「響應內容」標籤頁獲取完整響應。
             </div>
             <div class="json-viewer">\${syntaxHighlight(JSON.stringify(data.response, null, 2))}</div>
           \`;
@@ -569,9 +586,11 @@ function getHTML() {
       } else {
         imageHtml = \`
           <div class="error-message">
-            ❌ 圖片生成失敗<br>
-            錯誤：\${data.error || '未知錯誤'}
+            ❌ API 調用失敗<br>
+            <strong>錯誤：</strong>\${data.error || data.response?.error?.message || '未知錯誤'}<br>
+            <strong>狀態碼：</strong>\${data.status}
           </div>
+          <div class="json-viewer">\${syntaxHighlight(JSON.stringify(data.response || {}, null, 2))}</div>
         \`;
       }
       document.querySelector('[data-content="image"]').innerHTML = imageHtml;
@@ -579,7 +598,7 @@ function getHTML() {
 
     function syntaxHighlight(json) {
       json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return json.replace(/("[^"]*")([:])/g, '<span style="color:#9cdcfe">$1</span>$2')
+      return json.replace(/("([^"]*)"([:]?))/g, '<span style="color:#9cdcfe">$1</span>')
                 .replace(/([:]\s*)("[^"]*")/g, '$1<span style="color:#ce9178">$2</span>')
                 .replace(/([:]\s*)([0-9.]+)/g, '$1<span style="color:#b5cea8">$2</span>')
                 .replace(/([:]\s*)(true|false)/g, '$1<span style="color:#569cd6">$2</span>')
