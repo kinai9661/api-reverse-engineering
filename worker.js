@@ -1,25 +1,51 @@
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
 
-    // OpenAI-compatible API endpoints
-    if (url.pathname === '/v1/images/generations' && request.method === 'POST') {
-      return await handleOpenAIImageGeneration(request);
+      // CORS 预检请求
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          }
+        });
+      }
+
+      // OpenAI-compatible API endpoints
+      if (url.pathname === '/v1/images/generations' && request.method === 'POST') {
+        return await handleOpenAIImageGeneration(request);
+      }
+
+      if (url.pathname === '/v1/models' && request.method === 'GET') {
+        return handleModelsEndpoint();
+      }
+
+      // 原有的 API 端點
+      if (url.pathname === '/api/generate' && request.method === 'POST') {
+        return await handleGenerate(request);
+      }
+
+      // 返回 HTML UI
+      return new Response(getHTML(), {
+        headers: { 'Content-Type': 'text/html;charset=UTF-8' }
+      });
+
+    } catch (error) {
+      console.error('Worker Error:', error);
+      return new Response(JSON.stringify({
+        error: {
+          message: error.message,
+          stack: error.stack,
+          type: 'worker_error'
+        }
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
-
-    if (url.pathname === '/v1/models' && request.method === 'GET') {
-      return handleModelsEndpoint();
-    }
-
-    // 原有的 API 端點
-    if (url.pathname === '/api/generate' && request.method === 'POST') {
-      return await handleGenerate(request);
-    }
-
-    // 返回 HTML UI
-    return new Response(getHTML(), {
-      headers: { 'Content-Type': 'text/html;charset=UTF-8' }
-    });
   }
 };
 
@@ -28,7 +54,6 @@ async function handleOpenAIImageGeneration(request) {
   try {
     const body = await request.json();
 
-    // 解析 OpenAI 格式的请求
     const {
       prompt,
       n = 1,
@@ -37,7 +62,6 @@ async function handleOpenAIImageGeneration(request) {
       model = "gemini-3-pro-image-preview"
     } = body;
 
-    // 验证必需参数
     if (!prompt) {
       return new Response(JSON.stringify({
         error: {
@@ -48,11 +72,13 @@ async function handleOpenAIImageGeneration(request) {
         }
       }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
       });
     }
 
-    // 转换尺寸格式 (OpenAI -> Gemini)
     const sizeMap = {
       "1024x1024": "1K",
       "2048x2048": "2K",
@@ -60,7 +86,6 @@ async function handleOpenAIImageGeneration(request) {
     };
     const geminiSize = sizeMap[size] || "2K";
 
-    // 调用 Gemini API
     const apiUrl = "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent";
 
     const geminiRequest = {
@@ -88,37 +113,35 @@ async function handleOpenAIImageGeneration(request) {
 
     const geminiResponse = await response.json();
 
-    // 提取图片数据
     let imageData = null;
     if (response.ok && geminiResponse.candidates && geminiResponse.candidates[0]) {
       const candidate = geminiResponse.candidates[0];
       if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
         const text = candidate.content.parts[0].text;
-        const match = text.match(/!\[.*?\]\((data:image\/[^;]+;base64,([^)]+))\)/);
+        // 修复：使用正确的正则表达式转义
+        const regex = /!\[.*?\]\((data:image\/[^;]+;base64,([^)]+))\)/;
+        const match = text.match(regex);
         if (match) {
           imageData = {
-            fullDataUrl: match[1], // data:image/jpeg;base64,...
-            base64Only: match[2]   // 仅 Base64 部分
+            fullDataUrl: match[1],
+            base64Only: match[2]
           };
         }
       }
     }
 
-    // 转换为 OpenAI 格式的响应
     if (imageData) {
       const openAIResponse = {
         created: Math.floor(Date.now() / 1000),
         data: []
       };
 
-      // 根据 response_format 返回不同格式
       for (let i = 0; i < n; i++) {
         if (response_format === "b64_json") {
           openAIResponse.data.push({
             b64_json: imageData.base64Only
           });
         } else if (response_format === "url") {
-          // 返回 data URL（因为我们没有实际的托管 URL）
           openAIResponse.data.push({
             url: imageData.fullDataUrl
           });
@@ -132,7 +155,6 @@ async function handleOpenAIImageGeneration(request) {
         }
       });
     } else {
-      // API 调用失败
       return new Response(JSON.stringify({
         error: {
           message: geminiResponse.error?.message || "Failed to generate image",
@@ -142,11 +164,15 @@ async function handleOpenAIImageGeneration(request) {
         }
       }), {
         status: response.status || 500,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
       });
     }
 
   } catch (error) {
+    console.error('OpenAI API Error:', error);
     return new Response(JSON.stringify({
       error: {
         message: error.message,
@@ -156,12 +182,14 @@ async function handleOpenAIImageGeneration(request) {
       }
     }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
     });
   }
 }
 
-// OpenAI-compatible 模型列表端点
 function handleModelsEndpoint() {
   const models = {
     object: "list",
@@ -186,7 +214,6 @@ function handleModelsEndpoint() {
   });
 }
 
-// 原有的生成函数（保持不变）
 async function handleGenerate(request) {
   try {
     const body = await request.json();
@@ -227,7 +254,8 @@ async function handleGenerate(request) {
       const candidate = responseData.candidates[0];
       if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
         const text = candidate.content.parts[0].text;
-        const match = text.match(/!\[.*?\]\((data:image\/[^;]+;base64,[^)]+)\)/);
+        const regex = /!\[.*?\]\((data:image\/[^;]+;base64,[^)]+)\)/;
+        const match = text.match(regex);
         if (match) {
           extractedImageData = match[1];
         }
@@ -256,13 +284,17 @@ async function handleGenerate(request) {
     });
 
   } catch (error) {
+    console.error('Generate API Error:', error);
     return new Response(JSON.stringify({
       success: false,
       error: error.message,
       stack: error.stack
     }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
     });
   }
 }
@@ -275,41 +307,21 @@ function getHTML() {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>API 逆向工程輸出站 - OpenAI Compatible</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       padding: 20px;
     }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-    }
-
-    .header {
-      text-align: center;
-      color: white;
-      margin-bottom: 30px;
-    }
-
+    .container { max-width: 1400px; margin: 0 auto; }
+    .header { text-align: center; color: white; margin-bottom: 30px; }
     .header h1 {
       font-size: 2.5rem;
       margin-bottom: 10px;
       text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
     }
-
-    .header p {
-      font-size: 1.1rem;
-      opacity: 0.9;
-    }
-
+    .header p { font-size: 1.1rem; opacity: 0.9; }
     .api-badge {
       display: inline-block;
       background: rgba(255,255,255,0.2);
@@ -318,46 +330,28 @@ function getHTML() {
       margin: 5px;
       font-size: 0.9rem;
     }
-
     .main-grid {
       display: grid;
       grid-template-columns: 400px 1fr;
       gap: 20px;
       align-items: start;
     }
-
     .card {
       background: white;
       border-radius: 16px;
       padding: 24px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.2);
     }
-
-    .input-section {
-      position: sticky;
-      top: 20px;
-    }
-
-    .input-section h2 {
-      margin-bottom: 20px;
-      color: #333;
-      font-size: 1.5rem;
-    }
-
-    .form-group {
-      margin-bottom: 20px;
-    }
-
+    .input-section { position: sticky; top: 20px; }
+    .input-section h2 { margin-bottom: 20px; color: #333; font-size: 1.5rem; }
+    .form-group { margin-bottom: 20px; }
     label {
       display: block;
       margin-bottom: 8px;
       color: #555;
       font-weight: 600;
     }
-
-    input[type="text"],
-    textarea,
-    select {
+    input[type="text"], textarea, select {
       width: 100%;
       padding: 12px;
       border: 2px solid #e0e0e0;
@@ -365,31 +359,22 @@ function getHTML() {
       font-size: 14px;
       transition: border-color 0.3s;
     }
-
-    input[type="text"]:focus,
-    textarea:focus,
-    select:focus {
+    input[type="text"]:focus, textarea:focus, select:focus {
       outline: none;
       border-color: #667eea;
     }
-
     textarea {
       min-height: 100px;
       resize: vertical;
       font-family: inherit;
     }
-
-    input[type="range"] {
-      width: 100%;
-    }
-
+    input[type="range"] { width: 100%; }
     .range-value {
       display: inline-block;
       margin-left: 10px;
       color: #667eea;
       font-weight: bold;
     }
-
     button {
       width: 100%;
       padding: 14px;
@@ -402,22 +387,15 @@ function getHTML() {
       cursor: pointer;
       transition: transform 0.2s, box-shadow 0.2s;
     }
-
     button:hover {
       transform: translateY(-2px);
       box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
     }
-
-    button:active {
-      transform: translateY(0);
-    }
-
     button:disabled {
       opacity: 0.6;
       cursor: not-allowed;
       transform: none;
     }
-
     .api-docs {
       background: #f8f9fa;
       border-radius: 8px;
@@ -425,32 +403,20 @@ function getHTML() {
       margin-top: 20px;
       font-size: 13px;
     }
-
-    .api-docs h3 {
-      margin-bottom: 10px;
-      color: #333;
-    }
-
+    .api-docs h3 { margin-bottom: 10px; color: #333; }
     .api-docs code {
       background: #e9ecef;
       padding: 2px 6px;
       border-radius: 4px;
       font-family: 'Courier New', monospace;
     }
-
-    .output-section h2 {
-      margin-bottom: 20px;
-      color: #333;
-      font-size: 1.5rem;
-    }
-
+    .output-section h2 { margin-bottom: 20px; color: #333; font-size: 1.5rem; }
     .output-tabs {
       display: flex;
       gap: 10px;
       margin-bottom: 20px;
       border-bottom: 2px solid #e0e0e0;
     }
-
     .tab {
       padding: 10px 20px;
       background: none;
@@ -461,53 +427,32 @@ function getHTML() {
       transition: color 0.3s;
       width: auto;
     }
-
     .tab.active {
       color: #667eea;
       border-bottom: 3px solid #667eea;
       margin-bottom: -2px;
     }
-
-    .tab-content {
-      display: none;
-    }
-
-    .tab-content.active {
-      display: block;
-    }
-
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
     .api-info {
       background: #f8f9fa;
       border-radius: 8px;
       padding: 15px;
       margin-bottom: 15px;
     }
-
     .api-info-row {
       display: flex;
       justify-content: space-between;
       margin-bottom: 8px;
       font-size: 14px;
     }
-
-    .api-info-label {
-      font-weight: 600;
-      color: #555;
-    }
-
+    .api-info-label { font-weight: 600; color: #555; }
     .api-info-value {
       color: #667eea;
       font-family: 'Courier New', monospace;
     }
-
-    .status-success {
-      color: #10b981;
-    }
-
-    .status-error {
-      color: #ef4444;
-    }
-
+    .status-success { color: #10b981; }
+    .status-error { color: #ef4444; }
     .json-viewer {
       background: #1e1e1e;
       color: #d4d4d4;
@@ -519,24 +464,14 @@ function getHTML() {
       max-height: 500px;
       overflow-y: auto;
     }
-
-    .image-result {
-      text-align: center;
-    }
-
+    .image-result { text-align: center; }
     .image-result img {
       max-width: 100%;
       border-radius: 8px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
       margin-top: 15px;
     }
-
-    .loading {
-      text-align: center;
-      padding: 40px;
-      color: #667eea;
-    }
-
+    .loading { text-align: center; padding: 40px; color: #667eea; }
     .spinner {
       border: 4px solid #f3f3f3;
       border-top: 4px solid #667eea;
@@ -546,12 +481,10 @@ function getHTML() {
       animation: spin 1s linear infinite;
       margin: 0 auto 15px;
     }
-
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
-
     .error-message {
       background: #fee;
       color: #c33;
@@ -559,7 +492,6 @@ function getHTML() {
       border-radius: 8px;
       margin-bottom: 15px;
     }
-
     .success-badge {
       display: inline-block;
       background: #10b981;
@@ -570,15 +502,9 @@ function getHTML() {
       font-weight: 600;
       margin-top: 10px;
     }
-
     @media (max-width: 1024px) {
-      .main-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .input-section {
-        position: static;
-      }
+      .main-grid { grid-template-columns: 1fr; }
+      .input-section { position: static; }
     }
   </style>
 </head>
@@ -595,7 +521,6 @@ function getHTML() {
     </div>
 
     <div class="main-grid">
-      <!-- 輸入區域 -->
       <div class="card input-section">
         <h2>📝 生成設定</h2>
         <form id="generateForm">
@@ -637,19 +562,14 @@ function getHTML() {
           </button>
         </form>
 
-        <!-- OpenAI API 使用說明 -->
         <div class="api-docs">
           <h3>🔌 OpenAI Compatible API</h3>
           <p style="margin-bottom: 10px;">此服務提供 OpenAI 兼容的 API 端點：</p>
           <p><strong>POST</strong> <code>/v1/images/generations</code></p>
           <p><strong>GET</strong> <code>/v1/models</code></p>
-          <p style="margin-top: 10px; font-size: 12px; color: #666;">
-            可用於任何支持 OpenAI API 的應用程序
-          </p>
         </div>
       </div>
 
-      <!-- 輸出區域 -->
       <div class="card output-section">
         <h2>📊 API 輸出分析</h2>
 
@@ -658,7 +578,6 @@ function getHTML() {
           <button class="tab" data-tab="info">API 資訊</button>
           <button class="tab" data-tab="request">請求內容</button>
           <button class="tab" data-tab="response">響應內容</button>
-          <button class="tab" data-tab="openai">OpenAI 格式</button>
         </div>
 
         <div id="outputContainer">
@@ -667,91 +586,31 @@ function getHTML() {
               👆 填寫左側表單並點擊生成按鈕開始
             </p>
           </div>
-
           <div class="tab-content" data-content="info"></div>
           <div class="tab-content" data-content="request"></div>
           <div class="tab-content" data-content="response"></div>
-          <div class="tab-content" data-content="openai">
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
-              <h3 style="margin-bottom: 15px;">📘 OpenAI API 使用示例</h3>
-
-              <h4 style="margin: 15px 0 10px 0;">Python (OpenAI SDK)</h4>
-              <div class="json-viewer">
-from openai import OpenAI
-
-client = OpenAI(
-    api_key="your-api-key",
-    base_url="${window.location.origin}/v1"
-)
-
-response = client.images.generate(
-    model="gemini-3-pro-image-preview",
-    prompt="A beautiful sunset over mountains",
-    n=1,
-    size="1024x1024",
-    response_format="b64_json"
-)
-
-image_data = response.data[0].b64_json
-              </div>
-
-              <h4 style="margin: 15px 0 10px 0;">cURL</h4>
-              <div class="json-viewer">
-curl ${window.location.origin}/v1/images/generations \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "A beautiful sunset over mountains",
-    "n": 1,
-    "size": "1024x1024",
-    "response_format": "b64_json"
-  }'
-              </div>
-
-              <h4 style="margin: 15px 0 10px 0;">JavaScript (Fetch)</h4>
-              <div class="json-viewer">
-const response = await fetch("${window.location.origin}/v1/images/generations", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    prompt: "A beautiful sunset over mountains",
-    n: 1,
-    size: "1024x1024",
-    response_format: "b64_json"
-  })
-});
-
-const data = await response.json();
-const base64Image = data.data[0].b64_json;
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    // Temperature 滑桿
     const tempSlider = document.getElementById('temperature');
     const tempValue = document.getElementById('tempValue');
     tempSlider.addEventListener('input', (e) => {
       tempValue.textContent = e.target.value;
     });
 
-    // Tab 切換
     document.querySelectorAll('.tab').forEach(tab => {
       tab.addEventListener('click', () => {
         const tabName = tab.dataset.tab;
-
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-
         tab.classList.add('active');
-        document.querySelector(\`[data-content="\${tabName}"]\`).classList.add('active');
+        document.querySelector('[data-content="' + tabName + '"]').classList.add('active');
       });
     });
 
-    // 表單提交
     document.getElementById('generateForm').addEventListener('submit', async (e) => {
       e.preventDefault();
 
@@ -784,117 +643,45 @@ const base64Image = data.data[0].b64_json;
     });
 
     function showLoading() {
-      const html = \`
-        <div class="loading">
-          <div class="spinner"></div>
-          <p>正在調用 API 並生成圖片...</p>
-        </div>
-      \`;
+      const html = '<div class="loading"><div class="spinner"></div><p>正在調用 API 並生成圖片...</p></div>';
       document.querySelectorAll('.tab-content').forEach(el => el.innerHTML = html);
     }
 
     function showError(message) {
-      const html = \`
-        <div class="error-message">
-          <strong>❌ 錯誤：</strong> \${message}
-        </div>
-      \`;
+      const html = '<div class="error-message"><strong>❌ 錯誤：</strong> ' + message + '</div>';
       document.querySelector('[data-content="image"]').innerHTML = html;
     }
 
     function displayResults(data) {
-      // API 資訊
       const statusClass = data.success ? 'status-success' : 'status-error';
-      const infoHtml = \`
-        <div class="api-info">
-          <div class="api-info-row">
-            <span class="api-info-label">狀態：</span>
-            <span class="api-info-value \${statusClass}">\${data.status} \${data.success ? '✓' : '✗'}</span>
-          </div>
-          <div class="api-info-row">
-            <span class="api-info-label">響應時間：</span>
-            <span class="api-info-value">\${data.duration}ms</span>
-          </div>
-          <div class="api-info-row">
-            <span class="api-info-label">請求 URL：</span>
-            <span class="api-info-value" style="word-break: break-all; font-size: 11px;">\${data.request?.url || 'N/A'}</span>
-          </div>
-          <div class="api-info-row">
-            <span class="api-info-label">圖片數據：</span>
-            <span class="api-info-value">\${data.imageData ? '✅ 已提取' : '❌ 未找到'}</span>
-          </div>
-        </div>
-      \`;
+      const infoHtml = '<div class="api-info">' +
+        '<div class="api-info-row"><span class="api-info-label">狀態：</span>' +
+        '<span class="api-info-value ' + statusClass + '">' + data.status + ' ' + (data.success ? '✓' : '✗') + '</span></div>' +
+        '<div class="api-info-row"><span class="api-info-label">響應時間：</span>' +
+        '<span class="api-info-value">' + data.duration + 'ms</span></div>' +
+        '<div class="api-info-row"><span class="api-info-label">圖片數據：</span>' +
+        '<span class="api-info-value">' + (data.imageData ? '✅ 已提取' : '❌ 未找到') + '</span></div>' +
+        '</div>';
       document.querySelector('[data-content="info"]').innerHTML = infoHtml;
 
-      // 請求內容
-      const requestHtml = \`
-        <div class="json-viewer">\${syntaxHighlight(JSON.stringify(data.request, null, 2))}</div>
-      \`;
+      const requestHtml = '<div class="json-viewer">' + syntaxHighlight(JSON.stringify(data.request, null, 2)) + '</div>';
       document.querySelector('[data-content="request"]').innerHTML = requestHtml;
 
-      // 響應內容
-      const responseHtml = \`
-        <div class="json-viewer">\${syntaxHighlight(JSON.stringify(data.response, null, 2))}</div>
-      \`;
+      const responseHtml = '<div class="json-viewer">' + syntaxHighlight(JSON.stringify(data.response, null, 2)) + '</div>';
       document.querySelector('[data-content="response"]').innerHTML = responseHtml;
 
-      // OpenAI 格式示例
-      if (data.imageData) {
-        const base64Match = data.imageData.match(/base64,(.+)/);
-        const base64Only = base64Match ? base64Match[1] : '';
-
-        const openAIFormat = {
-          created: Math.floor(Date.now() / 1000),
-          data: [{
-            b64_json: base64Only.substring(0, 100) + '...' // 縮短顯示
-          }]
-        };
-
-        const openaiHtml = \`
-          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 15px;">
-            <h3 style="margin-bottom: 10px;">✅ OpenAI 兼容格式響應</h3>
-            <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
-              此 API 可通過 <code>/v1/images/generations</code> 端點以 OpenAI 格式調用
-            </p>
-          </div>
-          <div class="json-viewer">\${syntaxHighlight(JSON.stringify(openAIFormat, null, 2))}</div>
-          <p style="margin-top: 15px; color: #666; font-size: 13px;">
-            💡 Base64 數據已截斷顯示，實際響應包含完整圖片數據
-          </p>
-        \`;
-        document.querySelector('[data-content="openai"]').innerHTML = openaiHtml;
-      }
-
-      // 圖片結果
       let imageHtml = '';
       if (data.success && data.imageData) {
-        imageHtml = \`
-          <div class="image-result">
-            <img src="\${data.imageData}" alt="Generated Image" />
-            <div class="success-badge">✅ 圖片生成成功</div>
-            <p style="margin-top: 15px; color: #666; font-size: 14px;">
-              圖片已從 Markdown 格式中提取並顯示
-            </p>
-          </div>
-        \`;
+        imageHtml = '<div class="image-result">' +
+          '<img src="' + data.imageData + '" alt="Generated Image" />' +
+          '<div class="success-badge">✅ 圖片生成成功</div>' +
+          '<p style="margin-top: 15px; color: #666; font-size: 14px;">圖片已從 Markdown 格式中提取並顯示</p>' +
+          '</div>';
       } else if (data.success) {
-        imageHtml = \`
-          <div class="error-message">
-            ⚠️ API 響應成功，但未找到圖片數據。<br>
-            請查看「響應內容」標籤頁獲取完整響應。
-          </div>
-          <div class="json-viewer" style="max-height: 300px;">\${syntaxHighlight(JSON.stringify(data.response, null, 2))}</div>
-        \`;
+        imageHtml = '<div class="error-message">⚠️ API 響應成功，但未找到圖片數據。<br>請查看「響應內容」標籤頁獲取完整響應。</div>';
       } else {
-        imageHtml = \`
-          <div class="error-message">
-            ❌ API 調用失敗<br>
-            <strong>錯誤：</strong>\${data.error || data.response?.error?.message || '未知錯誤'}<br>
-            <strong>狀態碼：</strong>\${data.status}
-          </div>
-          <div class="json-viewer" style="max-height: 300px;">\${syntaxHighlight(JSON.stringify(data.response || {}, null, 2))}</div>
-        \`;
+        imageHtml = '<div class="error-message">❌ API 調用失敗<br><strong>錯誤：</strong>' + 
+          (data.error || '未知錯誤') + '</div>';
       }
       document.querySelector('[data-content="image"]').innerHTML = imageHtml;
     }
@@ -902,7 +689,7 @@ const base64Image = data.data[0].b64_json;
     function syntaxHighlight(json) {
       json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       return json.replace(/("([^"]*)"([:]?))/g, '<span style="color:#9cdcfe">$1</span>')
-                .replace(/([:]\s*)("[^"]*")/g, '$1<span style="color:#ce9178">$2</span>')
+                .replace(/([:]\s*)(\"[^\"]*\")/g, '$1<span style="color:#ce9178">$2</span>')
                 .replace(/([:]\s*)([0-9.]+)/g, '$1<span style="color:#b5cea8">$2</span>')
                 .replace(/([:]\s*)(true|false)/g, '$1<span style="color:#569cd6">$2</span>')
                 .replace(/([:]\s*)(null)/g, '$1<span style="color:#569cd6">$2</span>');
