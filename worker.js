@@ -516,7 +516,7 @@ function getHTML() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>API 逆向工程輸出站 - OpenAI Compatible</title>
+<title>API Reverse Engineering - OpenAI Compatible</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -748,202 +748,429 @@ button:disabled {
   margin-top: 10px;
 }
 @media (max-width: 1024px) {
-  .main-grid { grid-template-columns: 1fr; }
-  .input-section { position: static; }
+.main-grid { grid-template-columns: 1fr; }
+.input-section { position: static; }
 }
+.lang-switch {
+position: absolute;
+top: 20px;
+right: 20px;
+background: rgba(255,255,255,0.2);
+border: none;
+border-radius: 20px;
+padding: 8px 16px;
+cursor: pointer;
+font-size: 14px;
+color: white;
+transition: background 0.3s;
+}
+.lang-switch:hover {
+background: rgba(255,255,255,0.3);
+}
+.header { position: relative; }
 </style>
 </head>
 <body>
 <div class="container">
 <div class="header">
-  <h1>🔧 API 逆向工程輸出站</h1>
-  <p>Gemini 3 Pro Image Preview - 完整 API 請求/響應分析</p>
-  <div>
-    <span class="api-badge">🔐 API Key Protected</span>
-    <span class="api-badge">✅ OpenAI Compatible</span>
-    <span class="api-badge">✅ REST API</span>
-  </div>
+<button class="lang-switch" id="langSwitch" onclick="toggleLanguage()">EN / 中</button>
+<h1 id="mainTitle">🔧 API 逆向工程輸出站</h1>
+<p id="subTitle">Gemini 3 Pro Image Preview - 完整 API 請求/響應分析</p>
+<div>
+<span class="api-badge">🔐 API Key Protected</span>
+<span class="api-badge">✅ OpenAI Compatible</span>
+<span class="api-badge">✅ REST API</span>
+</div>
 </div>
 
 <div class="main-grid">
   <div class="card input-section">
-    <h2>📝 生成設定</h2>
-
-    <!-- API Key Section -->
-    <div class="api-key-section">
-      <h3>🔐 API Key（可選）</h3>
-      <input
-        type="password"
-        id="apiKey"
-        placeholder="輸入您的 API Key（如果需要）"
-      >
-      <div class="api-key-status">
-        <div class="status-indicator" id="keyStatus"></div>
-        <span id="keyStatusText">未驗證</span>
-      </div>
-    </div>
-
-    <form id="generateForm">
-      <div class="form-group">
-        <label for="prompt">圖片描述 (Prompt) *</label>
-        <textarea
-          id="prompt"
-          placeholder="例如：A futuristic city at sunset with flying cars..."
-          required
-        ></textarea>
-      </div>
-
-      <div class="form-group">
-        <label for="imageSize">圖片尺寸 (Size)</label>
-        <select id="imageSize">
-          <option value="256x256">256x256</option>
-          <option value="512x512">512x512</option>
-          <option value="1024x1024" selected>1024x1024 (1K)</option>
-          <option value="1792x1024">1792x1024 (Landscape)</option>
-          <option value="1024x1792">1024x1792 (Portrait)</option>
-          <option value="2048x2048">2048x2048 (2K)</option>
-          <option value="4096x4096">4096x4096 (4K)</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label for="quality">圖片品質 (Quality)</label>
-        <select id="quality">
-          <option value="standard" selected>Standard (標準)</option>
-          <option value="hd">HD (高品質)</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label for="style">風格 (Style)</label>
-        <select id="style">
-          <option value="natural" selected>Natural (自然)</option>
-          <option value="vivid">Vivid (鮮豔)</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label for="numImages">
-          生成數量 (N)
-          <span class="range-value" id="numImagesValue">1</span>
-        </label>
-        <input
-          type="range"
-          id="numImages"
-          min="1"
-          max="10"
-          step="1"
-          value="1"
-        >
-      </div>
-
-      <div class="form-group">
-        <label for="temperature">
-          創造性 (Temperature)
-          <span class="range-value" id="tempValue">1.0</span>
-        </label>
-        <input
-          type="range"
-          id="temperature"
-          min="0"
-          max="2"
-          step="0.1"
-          value="1.0"
-        >
-      </div>
-
-      <div class="form-group">
-        <label for="topP">
-          Top P
-          <span class="range-value" id="topPValue">0.95</span>
-        </label>
-        <input
-          type="range"
-          id="topP"
-          min="0"
-          max="1"
-          step="0.05"
-          value="0.95"
-        >
-      </div>
-
-      <div class="form-group">
-        <label for="topK">
-          Top K
-          <span class="range-value" id="topKValue">40</span>
-        </label>
-        <input
-          type="range"
-          id="topK"
-          min="1"
-          max="100"
-          step="1"
-          value="40"
-        >
-      </div>
-
-      <div class="form-group">
-        <label for="seed">隨機種子 (Seed)</label>
-        <input
-          type="number"
-          id="seed"
-          placeholder="留空為隨機"
-          min="0"
-          max="2147483647"
-        >
-      </div>
-
-      <div class="form-group">
-        <label for="negativePrompt">負面提示詞 (Negative Prompt)</label>
-        <textarea
-          id="negativePrompt"
-          placeholder="例如：blurry, low quality, distorted..."
-          style="min-height: 60px;"
-        ></textarea>
-      </div>
-
-      <button type="submit" id="generateBtn">
-        🚀 生成圖片並分析 API
-      </button>
-    </form>
-
-    <div class="api-docs">
-      <h3>🔌 OpenAI Compatible API</h3>
-      <p style="margin-bottom: 10px;">此服務提供 OpenAI 兼容的 API 端點：</p>
-      <p><strong>POST</strong> <code>/v1/images/generations</code></p>
-      <p><strong>GET</strong> <code>/v1/models</code></p>
-      <p style="margin-top: 10px; font-size: 12px; color: #666;">
-        💡 支持多種 API Key 傳遞方式
-      </p>
-    </div>
+  <h2 id="settingsTitle">📝 生成設定</h2>
+  
+  <!-- API Key Section -->
+  <div class="api-key-section">
+  <h3 id="apiKeyTitle">🔐 API Key（可選）</h3>
+  <input
+  type="password"
+  id="apiKey"
+  data-placeholder-zh="輸入您的 API Key（如果需要）"
+  data-placeholder-en="Enter your API Key (if required)"
+  placeholder="輸入您的 API Key（如果需要）"
+  >
+  <div class="api-key-status">
+  <div class="status-indicator" id="keyStatus"></div>
+  <span id="keyStatusText">未驗證</span>
+  </div>
+  </div>
+  
+  <form id="generateForm">
+  <div class="form-group">
+  <label for="prompt" id="promptLabel">圖片描述 (Prompt) *</label>
+  <textarea
+  id="prompt"
+  data-placeholder-zh="例如：A futuristic city at sunset with flying cars..."
+  data-placeholder-en="e.g., A futuristic city at sunset with flying cars..."
+  placeholder="例如：A futuristic city at sunset with flying cars..."
+  required
+  ></textarea>
+  </div>
+  
+  <div class="form-group">
+  <label for="imageSize" id="sizeLabel">圖片尺寸 (Size)</label>
+  <select id="imageSize">
+  <option value="256x256">256x256</option>
+  <option value="512x512">512x512</option>
+  <option value="1024x1024" selected>1024x1024 (1K)</option>
+  <option value="1792x1024">1792x1024 (Landscape)</option>
+  <option value="1024x1792">1024x1792 (Portrait)</option>
+  <option value="2048x2048">2048x2048 (2K)</option>
+  <option value="4096x4096">4096x4096 (4K)</option>
+  </select>
+  </div>
+  
+  <div class="form-group">
+  <label for="quality" id="qualityLabel">圖片品質 (Quality)</label>
+  <select id="quality">
+  <option value="standard" selected data-i18n-zh="Standard (標準)" data-i18n-en="Standard">Standard (標準)</option>
+  <option value="hd" data-i18n-zh="HD (高品質)" data-i18n-en="HD (High Quality)">HD (高品質)</option>
+  </select>
+  </div>
+  
+  <div class="form-group">
+  <label for="style" id="styleLabel">風格 (Style)</label>
+  <select id="style">
+  <option value="natural" selected data-i18n-zh="Natural (自然)" data-i18n-en="Natural">Natural (自然)</option>
+  <option value="vivid" data-i18n-zh="Vivid (鮮豔)" data-i18n-en="Vivid">Vivid (鮮豔)</option>
+  </select>
+  </div>
+  
+  <div class="form-group">
+  <label for="numImages" id="numImagesLabel">
+  生成數量 (N)
+  <span class="range-value" id="numImagesValue">1</span>
+  </label>
+  <input
+  type="range"
+  id="numImages"
+  min="1"
+  max="10"
+  step="1"
+  value="1"
+  >
+  </div>
+  
+  <div class="form-group">
+  <label for="temperature" id="tempLabel">
+  創造性 (Temperature)
+  <span class="range-value" id="tempValue">1.0</span>
+  </label>
+  <input
+  type="range"
+  id="temperature"
+  min="0"
+  max="2"
+  step="0.1"
+  value="1.0"
+  >
+  </div>
+  
+  <div class="form-group">
+  <label for="topP">
+  Top P
+  <span class="range-value" id="topPValue">0.95</span>
+  </label>
+  <input
+  type="range"
+  id="topP"
+  min="0"
+  max="1"
+  step="0.05"
+  value="0.95"
+  >
+  </div>
+  
+  <div class="form-group">
+  <label for="topK">
+  Top K
+  <span class="range-value" id="topKValue">40</span>
+  </label>
+  <input
+  type="range"
+  id="topK"
+  min="1"
+  max="100"
+  step="1"
+  value="40"
+  >
+  </div>
+  
+  <div class="form-group">
+  <label for="seed" id="seedLabel">隨機種子 (Seed)</label>
+  <input
+  type="number"
+  id="seed"
+  data-placeholder-zh="留空為隨機"
+  data-placeholder-en="Leave empty for random"
+  placeholder="留空為隨機"
+  min="0"
+  max="2147483647"
+  >
+  </div>
+  
+  <div class="form-group">
+  <label for="negativePrompt" id="negPromptLabel">負面提示詞 (Negative Prompt)</label>
+  <textarea
+  id="negativePrompt"
+  data-placeholder-zh="例如：blurry, low quality, distorted..."
+  data-placeholder-en="e.g., blurry, low quality, distorted..."
+  placeholder="例如：blurry, low quality, distorted..."
+  style="min-height: 60px;"
+  ></textarea>
+  </div>
+  
+  <button type="submit" id="generateBtn">
+  🚀 生成圖片並分析 API
+  </button>
+  </form>
+  
+  <div class="api-docs">
+  <h3>🔌 OpenAI Compatible API</h3>
+  <p style="margin-bottom: 10px;" id="apiDocsDesc">此服務提供 OpenAI 兼容的 API 端點：</p>
+  <p><strong>POST</strong> <code>/v1/images/generations</code></p>
+  <p><strong>GET</strong> <code>/v1/models</code></p>
+  <p style="margin-top: 10px; font-size: 12px; color: #666;" id="apiKeyHint">
+  💡 支持多種 API Key 傳遞方式
+  </p>
+  </div>
   </div>
 
   <div class="card output-section">
-    <h2>📊 API 輸出分析</h2>
-
-    <div class="output-tabs">
-      <button class="tab active" data-tab="image">生成圖片</button>
-      <button class="tab" data-tab="info">API 資訊</button>
-      <button class="tab" data-tab="request">請求內容</button>
-      <button class="tab" data-tab="response">響應內容</button>
-    </div>
-
-    <div id="outputContainer">
-      <div class="tab-content active" data-content="image">
-        <p style="text-align: center; color: #999; padding: 60px 20px;">
-          👆 填寫左側表單並點擊生成按鈕開始
-        </p>
-      </div>
-      <div class="tab-content" data-content="info"></div>
-      <div class="tab-content" data-content="request"></div>
-      <div class="tab-content" data-content="response"></div>
-    </div>
+  <h2 id="outputTitle">📊 API 輸出分析</h2>
+  
+  <div class="output-tabs">
+  <button class="tab active" data-tab="image" data-i18n-zh="生成圖片" data-i18n-en="Generated Image">生成圖片</button>
+  <button class="tab" data-tab="info" data-i18n-zh="API 資訊" data-i18n-en="API Info">API 資訊</button>
+  <button class="tab" data-tab="request" data-i18n-zh="請求內容" data-i18n-en="Request">請求內容</button>
+  <button class="tab" data-tab="response" data-i18n-zh="響應內容" data-i18n-en="Response">響應內容</button>
   </div>
-</div>
-</div>
+  
+  <div id="outputContainer">
+  <div class="tab-content active" data-content="image">
+  <p style="text-align: center; color: #999; padding: 60px 20px;" id="startHint">
+  👆 填寫左側表單並點擊生成按鈕開始
+  </p>
+  </div>
+  <div class="tab-content" data-content="info"></div>
+  <div class="tab-content" data-content="request"></div>
+  <div class="tab-content" data-content="response"></div>
+  </div>
+  </div>
+  </div>
+  </div>
 
 <script>
-// API Key 管理
+// ==================== i18n 語言系統 ====================
+const i18n = {
+zh: {
+mainTitle: '🔧 API 逆向工程輸出站',
+subTitle: 'Gemini 3 Pro Image Preview - 完整 API 請求/響應分析',
+settingsTitle: '📝 生成設定',
+apiKeyTitle: '🔐 API Key（可選）',
+apiKeyPlaceholder: '輸入您的 API Key（如果需要）',
+keyNotVerified: '未驗證',
+keyValid: '✅ 有效',
+keyInvalid: '❌ 無效',
+keyNoNeed: '⚠️ 無需驗證',
+promptLabel: '圖片描述 (Prompt) *',
+promptPlaceholder: '例如：A futuristic city at sunset with flying cars...',
+sizeLabel: '圖片尺寸 (Size)',
+qualityLabel: '圖片品質 (Quality)',
+qualityStandard: 'Standard (標準)',
+qualityHD: 'HD (高品質)',
+styleLabel: '風格 (Style)',
+styleNatural: 'Natural (自然)',
+styleVivid: 'Vivid (鮮豔)',
+numImagesLabel: '生成數量 (N)',
+tempLabel: '創造性 (Temperature)',
+seedLabel: '隨機種子 (Seed)',
+seedPlaceholder: '留空為隨機',
+negPromptLabel: '負面提示詞 (Negative Prompt)',
+negPromptPlaceholder: '例如：blurry, low quality, distorted...',
+generateBtn: '🚀 生成圖片並分析 API',
+generatingBtn: '⏳ 生成中...',
+apiDocsDesc: '此服務提供 OpenAI 兼容的 API 端點：',
+apiKeyHint: '💡 支持多種 API Key 傳遞方式',
+outputTitle: '📊 API 輸出分析',
+tabImage: '生成圖片',
+tabInfo: 'API 資訊',
+tabRequest: '請求內容',
+tabResponse: '響應內容',
+startHint: '👆 填寫左側表單並點擊生成按鈕開始',
+loadingText: '正在調用 API 並生成圖片...',
+errorPrefix: '❌ 錯誤：',
+statusLabel: '狀態：',
+responseTimeLabel: '響應時間：',
+imageDataLabel: '圖片數據：',
+imageExtracted: '✅ 已提取',
+imageNotFound: '❌ 未找到',
+imageSuccess: '✅ 圖片生成成功',
+imageExtractedNote: '圖片已從 Markdown 格式中提取並顯示',
+apiSuccessNoImage: '⚠️ API 響應成功，但未找到圖片數據。<br>請查看「響應內容」標籤頁獲取完整響應。',
+apiFailed: '❌ API 調用失敗',
+errorLabel: '錯誤：',
+unknownError: '未知錯誤',
+apiKeyInvalid: '❌ API Key 無效或缺失。請檢查您的 API Key 設定。'
+},
+en: {
+mainTitle: '🔧 API Reverse Engineering Gateway',
+subTitle: 'Gemini 3 Pro Image Preview - Full API Request/Response Analysis',
+settingsTitle: '📝 Generation Settings',
+apiKeyTitle: '🔐 API Key (Optional)',
+apiKeyPlaceholder: 'Enter your API Key (if required)',
+keyNotVerified: 'Not Verified',
+keyValid: '✅ Valid',
+keyInvalid: '❌ Invalid',
+keyNoNeed: '⚠️ No Verification Needed',
+promptLabel: 'Image Description (Prompt) *',
+promptPlaceholder: 'e.g., A futuristic city at sunset with flying cars...',
+sizeLabel: 'Image Size',
+qualityLabel: 'Image Quality',
+qualityStandard: 'Standard',
+qualityHD: 'HD (High Quality)',
+styleLabel: 'Style',
+styleNatural: 'Natural',
+styleVivid: 'Vivid',
+numImagesLabel: 'Number of Images (N)',
+tempLabel: 'Creativity (Temperature)',
+seedLabel: 'Random Seed',
+seedPlaceholder: 'Leave empty for random',
+negPromptLabel: 'Negative Prompt',
+negPromptPlaceholder: 'e.g., blurry, low quality, distorted...',
+generateBtn: '🚀 Generate Image & Analyze API',
+generatingBtn: '⏳ Generating...',
+apiDocsDesc: 'This service provides OpenAI-compatible API endpoints:',
+apiKeyHint: '💡 Multiple API Key delivery methods supported',
+outputTitle: '📊 API Output Analysis',
+tabImage: 'Generated Image',
+tabInfo: 'API Info',
+tabRequest: 'Request',
+tabResponse: 'Response',
+startHint: '👆 Fill in the form on the left and click generate to start',
+loadingText: 'Calling API and generating image...',
+errorPrefix: '❌ Error: ',
+statusLabel: 'Status: ',
+responseTimeLabel: 'Response Time: ',
+imageDataLabel: 'Image Data: ',
+imageExtracted: '✅ Extracted',
+imageNotFound: '❌ Not Found',
+imageSuccess: '✅ Image Generated Successfully',
+imageExtractedNote: 'Image extracted from Markdown format and displayed',
+apiSuccessNoImage: '⚠️ API response successful, but no image data found.<br>Check the "Response" tab for full response.',
+apiFailed: '❌ API Call Failed',
+errorLabel: 'Error: ',
+unknownError: 'Unknown Error',
+apiKeyInvalid: '❌ API Key is invalid or missing. Please check your API Key settings.'
+}
+};
+
+// 當前語言
+let currentLang = localStorage.getItem('lang') || 'zh';
+
+// 切換語言
+function toggleLanguage() {
+currentLang = currentLang === 'zh' ? 'en' : 'zh';
+localStorage.setItem('lang', currentLang);
+applyLanguage();
+}
+
+// 應用語言
+function applyLanguage() {
+const lang = i18n[currentLang];
+
+// 更新標題
+document.getElementById('mainTitle').textContent = lang.mainTitle;
+document.getElementById('subTitle').textContent = lang.subTitle;
+document.getElementById('settingsTitle').textContent = lang.settingsTitle;
+document.getElementById('apiKeyTitle').textContent = lang.apiKeyTitle;
+document.getElementById('outputTitle').textContent = lang.outputTitle;
+
+// 更新標籤
+document.getElementById('promptLabel').textContent = lang.promptLabel;
+document.getElementById('sizeLabel').textContent = lang.sizeLabel;
+document.getElementById('qualityLabel').textContent = lang.qualityLabel;
+document.getElementById('styleLabel').textContent = lang.styleLabel;
+document.getElementById('numImagesLabel').childNodes[0].textContent = lang.numImagesLabel + ' ';
+document.getElementById('tempLabel').childNodes[0].textContent = lang.tempLabel + ' ';
+document.getElementById('seedLabel').textContent = lang.seedLabel;
+document.getElementById('negPromptLabel').textContent = lang.negPromptLabel;
+
+// 更新 placeholder
+document.getElementById('apiKey').placeholder = lang.apiKeyPlaceholder;
+document.getElementById('prompt').placeholder = lang.promptPlaceholder;
+document.getElementById('seed').placeholder = lang.seedPlaceholder;
+document.getElementById('negativePrompt').placeholder = lang.negPromptPlaceholder;
+
+// 更新選項
+const qualitySelect = document.getElementById('quality');
+qualitySelect.options[0].text = lang.qualityStandard;
+qualitySelect.options[1].text = lang.qualityHD;
+
+const styleSelect = document.getElementById('style');
+styleSelect.options[0].text = lang.styleNatural;
+styleSelect.options[1].text = lang.styleVivid;
+
+// 更新按鈕
+const generateBtn = document.getElementById('generateBtn');
+if (!generateBtn.disabled) {
+generateBtn.textContent = lang.generateBtn;
+}
+
+// 更新 API 文檔
+document.getElementById('apiDocsDesc').textContent = lang.apiDocsDesc;
+document.getElementById('apiKeyHint').textContent = lang.apiKeyHint;
+
+// 更新標籤頁
+document.querySelectorAll('.tab').forEach(tab => {
+const key = tab.dataset.tab;
+const i18nKey = 'tab' + key.charAt(0).toUpperCase() + key.slice(1);
+if (lang[i18nKey]) {
+tab.textContent = lang[i18nKey];
+}
+});
+
+// 更新開始提示
+document.getElementById('startHint').textContent = lang.startHint;
+
+// 更新 HTML lang 屬性
+document.documentElement.lang = currentLang === 'zh' ? 'zh-TW' : 'en';
+
+// 更新 API Key 狀態文字
+updateKeyStatusText();
+}
+
+// 更新 Key 狀態文字
+function updateKeyStatusText() {
+const keyStatusText = document.getElementById('keyStatusText');
+const currentText = keyStatusText.textContent;
+const lang = i18n[currentLang];
+
+if (currentText.includes('未驗證') || currentText === 'Not Verified') {
+keyStatusText.textContent = lang.keyNotVerified;
+} else if (currentText.includes('有效') || currentText === '✅ Valid') {
+keyStatusText.textContent = lang.keyValid;
+} else if (currentText.includes('無效') || currentText === '❌ Invalid') {
+keyStatusText.textContent = lang.keyInvalid;
+} else if (currentText.includes('無需') || currentText === '⚠️ No Verification Needed') {
+keyStatusText.textContent = lang.keyNoNeed;
+}
+}
+
+// 頁面載入時應用語言
+document.addEventListener('DOMContentLoaded', () => {
+applyLanguage();
+});
+
+// ==================== API Key 管理 ====================
 const apiKeyInput = document.getElementById('apiKey');
 const keyStatus = document.getElementById('keyStatus');
 const keyStatusText = document.getElementById('keyStatusText');
@@ -951,47 +1178,47 @@ const keyStatusText = document.getElementById('keyStatusText');
 // 从 localStorage 加载 API Key
 const savedApiKey = localStorage.getItem('apiKey');
 if (savedApiKey) {
-  apiKeyInput.value = savedApiKey;
-  verifyApiKey(savedApiKey);
+apiKeyInput.value = savedApiKey;
+verifyApiKey(savedApiKey);
 }
 
 // API Key 输入变化时
 apiKeyInput.addEventListener('change', async (e) => {
-  const apiKey = e.target.value;
-  if (apiKey) {
-    localStorage.setItem('apiKey', apiKey);
-    await verifyApiKey(apiKey);
-  } else {
-    localStorage.removeItem('apiKey');
-    keyStatus.className = 'status-indicator';
-    keyStatusText.textContent = '未驗證';
-  }
+const apiKey = e.target.value;
+if (apiKey) {
+localStorage.setItem('apiKey', apiKey);
+await verifyApiKey(apiKey);
+} else {
+localStorage.removeItem('apiKey');
+keyStatus.className = 'status-indicator';
+keyStatusText.textContent = i18n[currentLang].keyNotVerified;
+}
 });
 
 // 验证 API Key
 async function verifyApiKey(apiKey) {
-  try {
-    const response = await fetch('/api/verify-key', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey
-      }
-    });
+try {
+const response = await fetch('/api/verify-key', {
+method: 'POST',
+headers: {
+'Content-Type': 'application/json',
+'Authorization': 'Bearer ' + apiKey
+}
+});
 
-    const data = await response.json();
+const data = await response.json();
 
-    if (data.valid) {
-      keyStatus.className = 'status-indicator valid';
-      keyStatusText.textContent = '✅ 有效';
-    } else {
-      keyStatus.className = 'status-indicator invalid';
-      keyStatusText.textContent = '❌ 無效';
-    }
-  } catch (error) {
-    keyStatus.className = 'status-indicator';
-    keyStatusText.textContent = '⚠️ 無需驗證';
-  }
+if (data.valid) {
+keyStatus.className = 'status-indicator valid';
+keyStatusText.textContent = i18n[currentLang].keyValid;
+} else {
+keyStatus.className = 'status-indicator invalid';
+keyStatusText.textContent = i18n[currentLang].keyInvalid;
+}
+} catch (error) {
+keyStatus.className = 'status-indicator';
+keyStatusText.textContent = i18n[currentLang].keyNoNeed;
+}
 }
 
 // 获取 API Key
@@ -1060,107 +1287,111 @@ document.getElementById('generateForm').addEventListener('submit', async (e) => 
   const apiKey = getApiKey();
 
   generateBtn.disabled = true;
-  generateBtn.textContent = '⏳ 生成中...';
-
+  generateBtn.textContent = i18n[currentLang].generatingBtn;
+  
   showLoading();
-
+  
   try {
-    const headers = {
-      'Content-Type': 'application/json'
-    };
-
-    // 添加 API Key（如果有）
-    if (apiKey) {
-      headers['Authorization'] = 'Bearer ' + apiKey;
-    }
-
-    // 構建請求體
-    const requestBody = {
-      prompt,
-      n,
-      size,
-      quality,
-      style,
-      temperature,
-      top_p,
-      top_k
-    };
-
-    // 添加可選參數
-    if (seedValue) {
-      requestBody.seed = parseInt(seedValue);
-    }
-    if (negative_prompt) {
-      requestBody.negative_prompt = negative_prompt;
-    }
-
-    const response = await fetch('/api/generate', {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(requestBody)
-    });
-
-    const data = await response.json();
-
-    if (response.status === 401) {
-      showError('❌ API Key 無效或缺失。請檢查您的 API Key 設定。');
-    } else {
-      displayResults(data);
-    }
-
-  } catch (error) {
-    showError(error.message);
-  } finally {
-    generateBtn.disabled = false;
-    generateBtn.textContent = '🚀 生成圖片並分析 API';
+  const headers = {
+  'Content-Type': 'application/json'
+  };
+  
+  // 添加 API Key（如果有）
+  if (apiKey) {
+  headers['Authorization'] = 'Bearer ' + apiKey;
   }
-});
-
-function showLoading() {
-  const html = '<div class="loading"><div class="spinner"></div><p>正在調用 API 並生成圖片...</p></div>';
+  
+  // 構建請求體
+  const requestBody = {
+  prompt,
+  n,
+  size,
+  quality,
+  style,
+  temperature,
+  top_p,
+  top_k
+  };
+  
+  // 添加可選參數
+  if (seedValue) {
+  requestBody.seed = parseInt(seedValue);
+  }
+  if (negative_prompt) {
+  requestBody.negative_prompt = negative_prompt;
+  }
+  
+  const response = await fetch('/api/generate', {
+  method: 'POST',
+  headers: headers,
+  body: JSON.stringify(requestBody)
+  });
+  
+  const data = await response.json();
+  
+  if (response.status === 401) {
+  showError(i18n[currentLang].apiKeyInvalid);
+  } else {
+  displayResults(data);
+  }
+  
+  } catch (error) {
+  showError(error.message);
+  } finally {
+  generateBtn.disabled = false;
+  generateBtn.textContent = i18n[currentLang].generateBtn;
+  }
+  });
+  
+  function showLoading() {
+  const html = '<div class="loading"><div class="spinner"></div><p>' + i18n[currentLang].loadingText + '</p></div>';
   document.querySelectorAll('.tab-content').forEach(el => el.innerHTML = html);
-}
-
-function showError(message) {
-  const html = '<div class="error-message"><strong>❌ 錯誤：</strong> ' + message + '</div>';
+  }
+  
+  function showError(message) {
+  const html = '<div class="error-message"><strong>' + i18n[currentLang].errorPrefix + '</strong> ' + message + '</div>';
   document.querySelector('[data-content="image"]').innerHTML = html;
-}
-
-function displayResults(data) {
+  }
+  
+  function displayResults(data) {
+  const lang = i18n[currentLang];
   const statusClass = data.success ? 'status-success' : 'status-error';
   const infoHtml = '<div class="api-info">' +
-    '<div class="api-info-row"><span class="api-info-label">狀態：</span>' +
-    '<span class="api-info-value ' + statusClass + '">' + data.status + ' ' + (data.success ? '✓' : '✗') + '</span></div>' +
-    '<div class="api-info-row"><span class="api-info-label">響應時間：</span>' +
-    '<span class="api-info-value">' + data.duration + 'ms</span></div>' +
-    '<div class="api-info-row"><span class="api-info-label">圖片數據：</span>' +
-    '<span class="api-info-value">' + (data.imageData ? '✅ 已提取' : '❌ 未找到') + '</span></div>' +
-    '</div>';
+  '<div class="api-info-row"><span class="api-info-label">' + lang.statusLabel + '</span>' +
+  '<span class="api-info-value ' + statusClass + '">' + data.status + ' ' + (data.success ? '✓' : '✗') + '</span></div>' +
+  '<div class="api-info-row"><span class="api-info-label">' + lang.responseTimeLabel + '</span>' +
+  '<span class="api-info-value">' + data.duration + 'ms</span></div>' +
+  '<div class="api-info-row"><span class="api-info-label">' + lang.imageDataLabel + '</span>' +
+  '<span class="api-info-value">' + (data.imageData ? lang.imageExtracted : lang.imageNotFound) + '</span></div>' +
+  '</div>';
   document.querySelector('[data-content="info"]').innerHTML = infoHtml;
-
+  
   const requestHtml = '<div class="json-viewer">' + syntaxHighlight(JSON.stringify(data.request, null, 2)) + '</div>';
   document.querySelector('[data-content="request"]').innerHTML = requestHtml;
-
+  
   const responseHtml = '<div class="json-viewer">' + syntaxHighlight(JSON.stringify(data.response, null, 2)) + '</div>';
   document.querySelector('[data-content="response"]').innerHTML = responseHtml;
-
+  
   let imageHtml = '';
   if (data.success && data.imageData) {
-    imageHtml = '<div class="image-result">' +
-      '<img src="' + data.imageData + '" alt="Generated Image" />' +
-      '<div class="success-badge">✅ 圖片生成成功</div>' +
-      '<p style="margin-top: 15px; color: #666; font-size: 14px;">圖片已從 Markdown 格式中提取並顯示</p>' +
-      '</div>';
+  imageHtml = '<div class="image-result">' +
+  '<img src="' + data.imageData + '" alt="Generated Image" />' +
+  '<div class="success-badge">' + lang.imageSuccess + '</div>' +
+  '<p style="margin-top: 15px; color: #666; font-size: 14px;">' + lang.imageExtractedNote + '</p>' +
+  '</div>';
   } else if (data.success) {
-    imageHtml = '<div class="error-message">⚠️ API 響應成功，但未找到圖片數據。<br>請查看「響應內容」標籤頁獲取完整響應。</div>';
+  imageHtml = '<div class="error-message">' + lang.apiSuccessNoImage + '</div>';
   } else {
-    imageHtml = '<div class="error-message">❌ API 調用失敗<br><strong>錯誤：</strong>' +
-      (data.error || '未知錯誤') + '</div>';
+  imageHtml = '<div class="error-message">' + lang.apiFailed + '<br><strong>' + lang.errorLabel + '</strong>' +
+  (data.error || lang.unknownError) + '</div>';
   }
   document.querySelector('[data-content="image"]').innerHTML = imageHtml;
-}
+  }
 
 function syntaxHighlight(json) {
+  if (json === undefined || json === null) {
+    return '<span style="color:#569cd6">null</span>';
+  }
   json = json.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>');
   return json.replace(/("([^"]*)"([:]?))/g, '<span style="color:#9cdcfe">$1</span>')
     .replace(/([:]\\s*)(\\"[^\\"]*\\")/g, '$1<span style="color:#ce9178">$2</span>')
