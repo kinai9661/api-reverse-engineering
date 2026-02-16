@@ -752,20 +752,25 @@ button:disabled {
 .input-section { position: static; }
 }
 .lang-switch {
-position: absolute;
+position: fixed;
 top: 20px;
 right: 20px;
-background: rgba(255,255,255,0.2);
+background: rgba(255,255,255,0.9);
 border: none;
 border-radius: 20px;
 padding: 8px 16px;
 cursor: pointer;
 font-size: 14px;
-color: white;
-transition: background 0.3s;
+color: #667eea;
+font-weight: 600;
+transition: all 0.3s;
+z-index: 1000;
+box-shadow: 0 2px 10px rgba(0,0,0,0.1);
 }
 .lang-switch:hover {
-background: rgba(255,255,255,0.3);
+background: white;
+box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+transform: translateY(-2px);
 }
 .header { position: relative; }
 </style>
