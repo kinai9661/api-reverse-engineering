@@ -213,12 +213,12 @@ const MODEL_REGISTRY = {
     status: "active",
     created: 1677610602
   },
-  "gemini-3.1-pro-preview": {
-    id: "gemini-3.1-pro-preview",
-    name: "Gemini 3.1 Pro Preview",
-    owned_by: "google",
-    description: "Google Gemini 3.1 Pro image generation model (preview)",
-    apiUrl: "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3.1-pro-preview:generateContent",
+  "gemini-3.1-flash-image-preview": {
+  	id: "gemini-3.1-flash-image-preview",
+  	name: "Gemini 3.1 Flash Image Preview",
+  	owned_by: "google",
+  	description: "Google Gemini 3.1 Flash image generation model (preview)",
+  	apiUrl: "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
     capabilities: {
       imageGeneration: true,
       supportedSizes: ["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792", "2048x2048", "4096x4096"],
@@ -235,14 +235,14 @@ const MODEL_REGISTRY = {
       top_k: 40,
       max_output_tokens: 8192
     },
-    aliases: ["gemini-3.1-pro", "gemini-3.1"],
+    aliases: ["gemini-3.1-flash", "gemini-3.1-flash-image"],
     status: "active",
     created: 1704067200
   }
 };
 
 // 預設模型
-const DEFAULT_MODEL = "gemini-3.1-pro-preview";
+const DEFAULT_MODEL = "gemini-3.1-flash-image-preview";
 
 // ==================== 模型管理函數 ====================
 
@@ -337,14 +337,33 @@ const SAFETY_SETTINGS = [
 const RESPONSE_MODALITIES = ["TEXT", "IMAGE"];
 
 // 寬高比映射（OpenAI 尺寸 -> Gemini aspectRatio）
+// 支援官方格式：1:1, 16:9, 9:16, 21:9
 const ASPECT_RATIO_MAP = {
-	'256x256': '1:1',
-	'512x512': '1:1',
-	'1024x1024': '1:1',
-	'1792x1024': '16:9',
-	'1024x1792': '9:16',
-	'2048x2048': '1:1',
-	'4096x4096': '1:1'
+  '256x256': '1:1',
+  '512x512': '1:1',
+  '1024x1024': '1:1',
+  '1792x1024': '16:9',
+  '1024x1792': '9:16',
+  '2048x2048': '1:1',
+  '4096x4096': '1:1',
+  // 新增 21:9 寬螢幕比例（官方 Gemini 3.1 Flash 支援）
+  '2560x1080': '21:9',
+  '3440x1440': '21:9',
+  '5120x2160': '21:9'
+};
+
+// 人物生成選項（官方 Gemini 3.1 Flash 支援）
+const PERSON_GENERATION_OPTIONS = {
+  'allow_all': 'allow_all',      // 允許所有人物
+  'allow_adult': 'allow_adult',  // 僅允許成人
+  'dont_allow': 'dont_allow'     // 不允許人物
+};
+
+// 輸出 MIME 類型（官方 Gemini 3.1 Flash 支援）
+const OUTPUT_MIME_TYPES = {
+  'png': 'image/png',
+  'jpeg': 'image/jpeg',
+  'webp': 'image/webp'
 };
 
 // 官方格式圖片尺寸映射
@@ -406,38 +425,46 @@ function validateAndNormalizeParams(body) {
   const finalSize = sizeValidation.valid ? sizeValidation.size : sizeValidation.fallback;
 
   return {
-  	// 標準 OpenAI 參數
-  	prompt: body.prompt,
-  	n: clamp(body.n || 1, 1, modelCapabilities.maxImages || 10),
-  	size: finalSize,
-  	response_format: body.response_format || 'b64_json',
-  	model: modelId,
+  // 標準 OpenAI 參數
+  prompt: body.prompt,
+  n: clamp(body.n || 1, 1, modelCapabilities.maxImages || 10),
+  size: finalSize,
+  response_format: body.response_format || 'b64_json',
+  model: modelId,
  
-  	// 新增 OpenAI 參數
-  	quality: body.quality || 'standard',
-  	style: body.style || 'natural',
-  	seed: body.seed !== undefined ? Math.floor(clamp(body.seed, 0, 2147483647)) : undefined,
+  // 新增 OpenAI 參數
+  quality: body.quality || 'standard',
+  style: body.style || 'natural',
+  seed: body.seed !== undefined ? Math.floor(clamp(body.seed, 0, 2147483647)) : undefined,
  
-  	// Gemini 擴展參數（使用模型預設值）
-  	temperature: clamp(body.temperature ?? modelDefaults.temperature, 0, 2),
-  	top_p: clamp(body.top_p ?? modelDefaults.top_p, 0, 1),
-  	top_k: clamp(body.top_k ?? modelDefaults.top_k, 1, 100),
-  	max_output_tokens: body.max_output_tokens || modelDefaults.max_output_tokens,
-  	negative_prompt: body.negative_prompt || null,
+  // Gemini 擴展參數（使用模型預設值）
+  temperature: clamp(body.temperature ?? modelDefaults.temperature, 0, 2),
+  top_p: clamp(body.top_p ?? modelDefaults.top_p, 0, 1),
+  top_k: clamp(body.top_k ?? modelDefaults.top_k, 1, 100),
+  max_output_tokens: body.max_output_tokens || modelDefaults.max_output_tokens,
+  negative_prompt: body.negative_prompt || null,
  
-  	// 官方格式開關（支援駝峰式和蛇形式）
-  	// 方案 C：根據模型類型自動判斷，圖片生成模型預設使用官方格式
-  	useOfficialFormat: body.useOfficialFormat === true || body.use_official_format === true
-  		|| (body.useOfficialFormat !== false && body.use_official_format !== false && modelCapabilities.imageGeneration === true),
+  // 官方 Gemini 3.1 Flash 新參數
+  // personGeneration: 控制人物生成（allow_all, allow_adult, dont_allow）
+  personGeneration: PERSON_GENERATION_OPTIONS[body.personGeneration] || body.personGeneration || null,
+  // outputMimeType: 輸出圖片格式（image/png, image/jpeg, image/webp）
+  outputMimeType: OUTPUT_MIME_TYPES[body.outputMimeType] || body.outputMimeType || null,
+  // aspectRatio: 直接指定寬高比（優先於 size 映射）
+  aspectRatio: body.aspectRatio || null,
  
-  	// 方案 F：Debug 模式（支援駝峰式和蛇形式）
-  	debug: body.debug === true || body._debug === true,
+  // 官方格式開關（支援駝峰式和蛇形式）
+  // 方案 C：根據模型類型自動判斷，圖片生成模型預設使用官方格式
+  useOfficialFormat: body.useOfficialFormat === true || body.use_official_format === true
+    || (body.useOfficialFormat !== false && body.use_official_format !== false && modelCapabilities.imageGeneration === true),
  
-  	// 模型配置資訊
-  	modelConfig: modelConfig || MODEL_REGISTRY[DEFAULT_MODEL],
-  	modelWarning: modelWarning,
-  	sizeWarning: sizeValidation.message || null
-  };
+  // 方案 F：Debug 模式（支援駝峰式和蛇形式）
+  debug: body.debug === true || body._debug === true,
+ 
+  // 模型配置資訊
+  modelConfig: modelConfig || MODEL_REGISTRY[DEFAULT_MODEL],
+  modelWarning: modelWarning,
+  sizeWarning: sizeValidation.message || null
+   };
  }
 
 // 構建 Gemini 請求（支援混合模式：向後兼容 + 官方格式）
@@ -471,33 +498,53 @@ function buildGeminiRequest(params) {
 		responseModalities: RESPONSE_MODALITIES
 	};
 
-	// 添加 seed
-	if (params.seed !== undefined) {
-		generationConfig.seed = params.seed;
-	}
-
 	// 根據 quality 調整參數
 	if (params.quality === 'hd') {
-		generationConfig.temperature = Math.max(generationConfig.temperature, QUALITY_MAP['hd']);
+	  generationConfig.temperature = Math.max(generationConfig.temperature, QUALITY_MAP['hd']);
 	}
 
 	// ==================== 混合模式：官方格式 vs 向後兼容 ====================
 	if (params.useOfficialFormat) {
-		// 官方 Gemini API 格式
-		// 註：responseModalities 已在基礎 generationConfig 中設定
+	  // 官方 Gemini 3.1 Flash API 格式
+	  // 註：responseModalities 已在基礎 generationConfig 中設定
 
-		// 構建 imageConfig
-		generationConfig.imageConfig = {
-			aspectRatio: ASPECT_RATIO_MAP[params.size] || '1:1',
-			imageSize: OFFICIAL_IMAGE_SIZE_MAP[params.size] || '2K'
-		};
+	  // 構建 imageConfig（官方格式）
+	  // 參考：https://ai.google.dev/gemini-api/docs/image-generation
+	  const imageConfig = {
+		// 寬高比：優先使用直接指定的 aspectRatio，否則從 size 映射
+		aspectRatio: params.aspectRatio || ASPECT_RATIO_MAP[params.size] || '1:1',
+		// 圖片尺寸
+		imageSize: OFFICIAL_IMAGE_SIZE_MAP[params.size] || '2K'
+	  };
 
-		// 返回官方格式請求（包含 safetySettings）
-		return {
-			contents,
-			generationConfig,
-			safetySettings: SAFETY_SETTINGS
-		};
+	  // 添加 numberOfImages（映射自 OpenAI 的 n 參數）
+	  if (params.n && params.n > 1) {
+		imageConfig.numberOfImages = params.n;
+	  }
+
+	  // 添加 personGeneration（人物生成控制）
+	  if (params.personGeneration) {
+		imageConfig.personGeneration = params.personGeneration;
+	  }
+
+	  // 添加 outputMimeType（輸出格式）
+	  if (params.outputMimeType) {
+		imageConfig.outputMimeType = params.outputMimeType;
+	  }
+
+	  // 添加 seed（官方格式中 seed 放在 imageConfig 內）
+	  if (params.seed !== undefined) {
+		imageConfig.seed = params.seed;
+	  }
+
+	  generationConfig.imageConfig = imageConfig;
+
+	  // 返回官方格式請求（包含 safetySettings）
+	  return {
+		contents,
+		generationConfig,
+		safetySettings: SAFETY_SETTINGS
+	  };
 	} else {
 		// 向後兼容模式：將尺寸信息嵌入提示詞
 		const geminiSize = SIZE_MAP[params.size] || '2K';

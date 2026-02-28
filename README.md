@@ -111,10 +111,10 @@ image = response.data[0].b64_json
 ### 使用不同模型
 
 ```python
-# 使用 gemini-3.1-pro-preview 模型（預設）
+# 使用 gemini-3.1-flash-image-preview 模型（預設）
 response = client.images.generate(
     prompt="A beautiful sunset",
-    model="gemini-3.1-pro-preview", # 或使用別名 "gemini-3.1"
+    model="gemini-3.1-flash-image-preview",  # 或使用別名 "gemini-3.1-flash"
     size="1024x1024"
 )
 
@@ -151,6 +151,34 @@ response = client.images.generate(
 | `useOfficialFormat` | boolean | true/false | 使用官方 Gemini API 格式（預設 false） |
 | `debug` | boolean | true/false | Debug 模式，返回完整請求/響應資訊（預設 false） |
 
+### 官方 Gemini 3.1 Flash 新參數
+
+以下參數僅在 `useOfficialFormat: true` 時生效，符合官方 Gemini 3.1 Flash API 格式：
+
+| 參數 | 類型 | 可選值 | 描述 |
+|------|------|--------|------|
+| `personGeneration` | string | "allow_all", "allow_adult", "dont_allow" | 控制人物生成 |
+| `outputMimeType` | string | "image/png", "image/jpeg", "image/webp" | 輸出圖片格式 |
+| `aspectRatio` | string | "1:1", "16:9", "9:16", "21:9" | 直接指定寬高比（優先於 size 映射） |
+
+**使用範例：**
+```python
+# 使用官方 Gemini 3.1 Flash 格式
+response = client.images.generate(
+    model="gemini-3.1-flash-image-preview",
+    prompt="A cyberpunk street vendor selling futuristic ramen",
+    size="2048x2048",
+    n=2,  # 生成 2 張圖片
+    extra_body={
+        "useOfficialFormat": True,
+        "personGeneration": "allow_adult",
+        "outputMimeType": "image/jpeg",
+        "aspectRatio": "21:9",
+        "seed": 8888888
+    }
+)
+```
+
 ### Debug 模式
 
 當 `debug: true` 時，API 將返回完整的請求和響應資訊，方便診斷問題：
@@ -182,8 +210,12 @@ print(response)  # 將顯示完整的請求和響應資訊
 
 **官方格式特性：**
 - ✅ `responseModalities`: ["TEXT", "IMAGE"] - 支援文字和圖片輸出
-- ✅ `imageConfig.aspectRatio` - 寬高比設定（1:1, 16:9, 9:16）
+- ✅ `imageConfig.aspectRatio` - 寬高比設定（1:1, 16:9, 9:16, **21:9**）
 - ✅ `imageConfig.imageSize` - 圖片尺寸（256px, 512px, 1K, 2K, 4K）
+- ✅ `imageConfig.numberOfImages` - 生成圖片數量（映射自 `n` 參數）
+- ✅ `imageConfig.personGeneration` - 人物生成控制（allow_all, allow_adult, dont_allow）
+- ✅ `imageConfig.outputMimeType` - 輸出格式（image/png, image/jpeg, image/webp）
+- ✅ `imageConfig.seed` - 隨機種子（放在 imageConfig 內）
 - ✅ `safetySettings` - 關閉所有內容過濾（BLOCK_NONE）
 
 **使用範例：**
@@ -195,6 +227,21 @@ response = client.images.generate(
     size="1024x1024",
     extra_body={
         "useOfficialFormat": True
+    }
+)
+
+# 使用完整官方 Gemini 3.1 Flash 格式
+response = client.images.generate(
+    model="gemini-3.1-flash-image-preview",
+    prompt="A cyberpunk street vendor selling futuristic ramen",
+    size="2048x2048",
+    n=2,
+    extra_body={
+        "useOfficialFormat": True,
+        "aspectRatio": "21:9",
+        "personGeneration": "allow_adult",
+        "outputMimeType": "image/jpeg",
+        "seed": 8888888
     }
 )
 ```
@@ -395,10 +442,10 @@ For detailed documentation, see: `OPENAI_API_DOCS.md`
 ### Using Different Models
 
 ```python
-# Use gemini-3.1-pro-preview model (default)
+# Use gemini-3.1-flash-image-preview model (default)
 response = client.images.generate(
     prompt="A beautiful sunset",
-    model="gemini-3.1-pro-preview", # or use alias "gemini-3.1"
+    model="gemini-3.1-flash-image-preview",  # or use alias "gemini-3.1-flash"
     size="1024x1024"
 )
 
@@ -417,7 +464,7 @@ response = client.images.generate(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `prompt` | string | Required | Image description prompt |
-| `model` | string | "gemini-3.1-pro-preview" | Model ID or alias to use |
+| `model` | string | "gemini-3.1-flash-image-preview" | Model ID or alias to use |
 | `size` | string | "1024x1024" | Image size |
 | `n` | integer | 1 | Number of images to generate (1-10) |
 | `quality` | string | "standard" | Image quality ("standard", "hd") |
