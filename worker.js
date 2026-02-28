@@ -426,7 +426,9 @@ function validateAndNormalizeParams(body) {
   	negative_prompt: body.negative_prompt || null,
  
   	// 官方格式開關（支援駝峰式和蛇形式）
-  	useOfficialFormat: body.useOfficialFormat === true || body.use_official_format === true,
+  	// 方案 C：根據模型類型自動判斷，圖片生成模型預設使用官方格式
+  	useOfficialFormat: body.useOfficialFormat === true || body.use_official_format === true
+  		|| (body.useOfficialFormat !== false && body.use_official_format !== false && modelCapabilities.imageGeneration === true),
  
   	// 模型配置資訊
   	modelConfig: modelConfig || MODEL_REGISTRY[DEFAULT_MODEL],
