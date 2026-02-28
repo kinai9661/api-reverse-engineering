@@ -430,6 +430,9 @@ function validateAndNormalizeParams(body) {
   	useOfficialFormat: body.useOfficialFormat === true || body.use_official_format === true
   		|| (body.useOfficialFormat !== false && body.use_official_format !== false && modelCapabilities.imageGeneration === true),
  
+  	// 方案 F：Debug 模式（支援駝峰式和蛇形式）
+  	debug: body.debug === true || body._debug === true,
+ 
   	// 模型配置資訊
   	modelConfig: modelConfig || MODEL_REGISTRY[DEFAULT_MODEL],
   	modelWarning: modelWarning,
@@ -508,28 +511,62 @@ function buildGeminiRequest(params) {
 }
 
 // 從 Gemini 響應中提取圖片數據
+// 方案 G：擴展支援 inlineData 格式
+// 方案 H：新增空 base64 檢測
 function extractImageData(geminiResponse) {
-  if (!geminiResponse.candidates || !geminiResponse.candidates[0]) {
-    return null;
-  }
+	if (!geminiResponse.candidates || !geminiResponse.candidates[0]) {
+		return { error: "No candidates in response", errorType: "no_candidates" };
+	}
 
-  const candidate = geminiResponse.candidates[0];
-  if (!candidate.content || !candidate.content.parts || !candidate.content.parts[0]) {
-    return null;
-  }
+	const candidate = geminiResponse.candidates[0];
+	if (!candidate.content || !candidate.content.parts || !candidate.content.parts[0]) {
+		return { error: "No content parts in response", errorType: "no_content" };
+	}
 
-  const text = candidate.content.parts[0].text;
-  const regex = /!\[.*?\]\((data:image\/[^;]+;base64,([^)]+))\)/;
-  const match = text.match(regex);
+	// 遍歷所有 parts 尋找圖片數據
+	for (const part of candidate.content.parts) {
+		// 方案 G：檢查 inlineData 格式（Gemini 原生格式）
+		if (part.inlineData && part.inlineData.mimeType && part.inlineData.data) {
+			// 檢查是否為空數據
+			if (!part.inlineData.data || part.inlineData.data.trim() === '') {
+				return {
+					error: "inlineData contains empty base64 data",
+					errorType: "empty_base64",
+					format: "inlineData"
+				};
+			}
+			return {
+				fullDataUrl: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+				base64Only: part.inlineData.data,
+				format: "inlineData"
+			};
+		}
 
-  if (match) {
-    return {
-      fullDataUrl: match[1],
-      base64Only: match[2]
-    };
-  }
+		// 檢查 text 格式（markdown 格式）
+		if (part.text) {
+			const regex = /!\[.*?\]\((data:image\/[^;]+;base64,([^)]+))\)/;
+			const match = part.text.match(regex);
 
-  return null;
+			if (match) {
+				// 方案 H：檢測空 base64 數據
+				if (!match[2] || match[2].trim() === '') {
+					return {
+						error: "Markdown image contains empty base64 data",
+						errorType: "empty_base64",
+						format: "markdown",
+						rawText: part.text
+					};
+				}
+				return {
+					fullDataUrl: match[1],
+					base64Only: match[2],
+					format: "markdown"
+				};
+			}
+		}
+	}
+
+	return { error: "No image data found in any format", errorType: "no_image" };
 }
 
 // 構建 OpenAI 格式響應
@@ -561,85 +598,156 @@ function buildOpenAIResponse(imageData, params) {
 }
 
 // ==================== OpenAI 兼容圖片生成端點 ====================
+// 方案 F：新增 Debug 模式
+// 方案 H：新增錯誤處理改進
 async function handleOpenAIImageGeneration(request) {
-  try {
-    const body = await request.json();
+	try {
+		const body = await request.json();
 
-    // 參數驗證與標準化（支援多模型）
-    const params = validateAndNormalizeParams(body);
+		// 參數驗證與標準化（支援多模型）
+		const params = validateAndNormalizeParams(body);
 
-    // 構建 Gemini 請求
-    const geminiRequest = buildGeminiRequest(params);
+		// 構建 Gemini 請求
+		const geminiRequest = buildGeminiRequest(params);
 
-    // 從模型配置取得 API URL
-    const apiUrl = getModelApiUrl(params.modelConfig);
+		// 從模型配置取得 API URL
+		const apiUrl = getModelApiUrl(params.modelConfig);
 
-    // 調用 Gemini API
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      },
-      body: JSON.stringify(geminiRequest)
-    });
+		// 調用 Gemini API
+		const response = await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+			},
+			body: JSON.stringify(geminiRequest)
+		});
 
-    const geminiResponse = await response.json();
+		const geminiResponse = await response.json();
 
-    // 提取圖片數據
-    const imageData = extractImageData(geminiResponse);
+		// 方案 F：Debug 模式 - 返回完整請求/響應資訊
+		if (params.debug) {
+			return new Response(JSON.stringify({
+				debug: true,
+				request: {
+					url: apiUrl,
+					body: geminiRequest
+				},
+				response: {
+					status: response.status,
+					statusText: response.statusText,
+					body: geminiResponse
+				},
+				params: {
+					model: params.model,
+					size: params.size,
+					useOfficialFormat: params.useOfficialFormat,
+					responseModalities: geminiRequest.generationConfig?.responseModalities
+				}
+			}), {
+				headers: {
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
 
-    if (imageData) {
-      // 構建 OpenAI 格式響應
-      const openAIResponse = buildOpenAIResponse(imageData, params);
+		// 提取圖片數據
+		const imageData = extractImageData(geminiResponse);
 
-      // 如果有警告訊息，加入響應中
-      if (params.modelWarning || params.sizeWarning) {
-        openAIResponse.warnings = [];
-        if (params.modelWarning) openAIResponse.warnings.push(params.modelWarning);
-        if (params.sizeWarning) openAIResponse.warnings.push(params.sizeWarning);
-      }
+		// 方案 H：檢查是否有錯誤
+		if (imageData && imageData.error) {
+			// 根據錯誤類型返回不同的錯誤訊息
+			let errorMessage = imageData.error;
+			let errorType = imageData.errorType || "api_error";
+			
+			// 針對空 base64 數據的特殊處理
+			if (imageData.errorType === "empty_base64") {
+				errorMessage = `API returned empty image data. This may indicate: ` +
+					`1) The proxy API does not support 'responseModalities' parameter, ` +
+					`2) The model is not available for image generation, or ` +
+					`3) Authentication/quota issues. ` +
+					`Try using debug:true to see full response details. ` +
+					`Format detected: ${imageData.format}`;
+			}
 
-      // 加入模型資訊
-      openAIResponse.model = params.model;
+			return new Response(JSON.stringify({
+				error: {
+					message: errorMessage,
+					type: errorType,
+					param: null,
+					code: response.status,
+					debug_info: {
+						errorType: imageData.errorType,
+						format: imageData.format,
+						rawText: imageData.rawText ? imageData.rawText.substring(0, 200) + '...' : undefined
+					}
+				}
+			}), {
+				status: response.status || 500,
+				headers: {
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
 
-      return new Response(JSON.stringify(openAIResponse), {
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
-    } else {
-      return new Response(JSON.stringify({
-        error: {
-          message: geminiResponse.error?.message || "Failed to generate image",
-          type: "api_error",
-          param: null,
-          code: response.status
-        }
-      }), {
-        status: response.status || 500,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
-    }
+		if (imageData && imageData.base64Only) {
+			// 構建 OpenAI 格式響應
+			const openAIResponse = buildOpenAIResponse(imageData, params);
 
-  } catch (error) {
-    console.error('OpenAI API Error:', error);
-    return new Response(JSON.stringify({
-      error: {
-        message: error.message,
-        type: error.type || "server_error",
-        param: error.param || null,
-        code: null
-      }
-    }), {
-      status: 400,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
+			// 如果有警告訊息，加入響應中
+			if (params.modelWarning || params.sizeWarning) {
+				openAIResponse.warnings = [];
+				if (params.modelWarning) openAIResponse.warnings.push(params.modelWarning);
+				if (params.sizeWarning) openAIResponse.warnings.push(params.sizeWarning);
+			}
+
+			// 加入模型資訊
+			openAIResponse.model = params.model;
+
+			// 方案 G：記錄圖片格式
+			if (imageData.format) {
+				openAIResponse.format = imageData.format;
+			}
+
+			return new Response(JSON.stringify(openAIResponse), {
+				headers: {
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		} else {
+			return new Response(JSON.stringify({
+				error: {
+					message: geminiResponse.error?.message || "Failed to generate image - no valid image data found",
+					type: "api_error",
+					param: null,
+					code: response.status
+				}
+			}), {
+				status: response.status || 500,
+				headers: {
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
+
+	} catch (error) {
+		console.error('OpenAI API Error:', error);
+		return new Response(JSON.stringify({
+			error: {
+				message: error.message,
+				type: error.type || "server_error",
+				param: error.param || null,
+				code: null
+			}
+		}), {
+			status: 400,
+			headers: {
+				'Content-Type': 'application/json',
+				'Access-Control-Allow-Origin': '*'
       }
     });
   }

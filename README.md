@@ -149,6 +149,32 @@ response = client.images.generate(
 | `top_k` | integer | 1-100 | Top-K 採樣參數 |
 | `negative_prompt` | string | - | 負面提示詞，排除不想要的元素 |
 | `useOfficialFormat` | boolean | true/false | 使用官方 Gemini API 格式（預設 false） |
+| `debug` | boolean | true/false | Debug 模式，返回完整請求/響應資訊（預設 false） |
+
+### Debug 模式
+
+當 `debug: true` 時，API 將返回完整的請求和響應資訊，方便診斷問題：
+
+**使用範例：**
+```python
+# 使用 Debug 模式診斷問題
+response = client.images.generate(
+    model="gemini-3-pro-image-preview",
+    prompt="a beautiful sunset",
+    size="1024x1024",
+    extra_body={
+        "debug": True
+    }
+)
+print(response)  # 將顯示完整的請求和響應資訊
+```
+
+**Debug 模式輸出包含：**
+- `request.url` - API 端點 URL
+- `request.body` - 發送的完整請求內容
+- `response.status` - HTTP 狀態碼
+- `response.body` - API 返回的完整響應
+- `params` - 解析後的參數資訊
 
 ### 官方 Gemini API 格式說明
 
@@ -407,6 +433,32 @@ response = client.images.generate(
 | `top_k` | integer | 1-100 | Top-K sampling parameter |
 | `negative_prompt` | string | - | Negative prompt to exclude unwanted elements |
 | `useOfficialFormat` | boolean | true/false | Use official Gemini API format (default: false) |
+| `debug` | boolean | true/false | Debug mode, returns full request/response info (default: false) |
+
+### Debug Mode
+
+When `debug: true`, the API returns complete request and response information for troubleshooting:
+
+**Usage Example:**
+```python
+# Use Debug mode to diagnose issues
+response = client.images.generate(
+    model="gemini-3-pro-image-preview",
+    prompt="a beautiful sunset",
+    size="1024x1024",
+    extra_body={
+        "debug": True
+    }
+)
+print(response)  # Will show complete request and response info
+```
+
+**Debug Mode Output Includes:**
+- `request.url` - API endpoint URL
+- `request.body` - Complete request content sent
+- `response.status` - HTTP status code
+- `response.body` - Complete response from API
+- `params` - Parsed parameter information
 
 ### Official Gemini API Format
 
