@@ -242,7 +242,7 @@ const MODEL_REGISTRY = {
 };
 
 // 預設模型
-const DEFAULT_MODEL = "gemini-3-pro-image-preview";
+const DEFAULT_MODEL = "gemini-3.1-pro-preview";
 
 // ==================== 模型管理函數 ====================
 
@@ -1105,6 +1105,14 @@ transform: translateY(-2px);
   
   <form id="generateForm">
   <div class="form-group">
+  <label for="model" id="modelLabel">模型 (Model)</label>
+  <select id="model">
+  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview (預設)</option>
+  <option value="gemini-3-pro-image-preview">Gemini 3 Pro Image Preview</option>
+  </select>
+  </div>
+  
+  <div class="form-group">
   <label for="prompt" id="promptLabel">圖片描述 (Prompt) *</label>
   <textarea
   id="prompt"
@@ -1281,6 +1289,9 @@ keyNotVerified: '未驗證',
 keyValid: '✅ 有效',
 keyInvalid: '❌ 無效',
 keyNoNeed: '⚠️ 無需驗證',
+modelLabel: '模型 (Model)',
+modelDefault: 'Gemini 3.1 Pro Preview (預設)',
+modelGemini3Pro: 'Gemini 3 Pro Image Preview',
 promptLabel: '圖片描述 (Prompt) *',
 promptPlaceholder: '例如：A futuristic city at sunset with flying cars...',
 sizeLabel: '圖片尺寸 (Size)',
@@ -1331,6 +1342,9 @@ keyNotVerified: 'Not Verified',
 keyValid: '✅ Valid',
 keyInvalid: '❌ Invalid',
 keyNoNeed: '⚠️ No Verification Needed',
+modelLabel: 'Model',
+modelDefault: 'Gemini 3.1 Pro Preview (Default)',
+modelGemini3Pro: 'Gemini 3 Pro Image Preview',
 promptLabel: 'Image Description (Prompt) *',
 promptPlaceholder: 'e.g., A futuristic city at sunset with flying cars...',
 sizeLabel: 'Image Size',
@@ -1395,6 +1409,7 @@ document.getElementById('apiKeyTitle').textContent = lang.apiKeyTitle;
 document.getElementById('outputTitle').textContent = lang.outputTitle;
 
 // 更新標籤
+document.getElementById('modelLabel').textContent = lang.modelLabel;
 document.getElementById('promptLabel').textContent = lang.promptLabel;
 document.getElementById('sizeLabel').textContent = lang.sizeLabel;
 document.getElementById('qualityLabel').textContent = lang.qualityLabel;
@@ -1411,6 +1426,10 @@ document.getElementById('seed').placeholder = lang.seedPlaceholder;
 document.getElementById('negativePrompt').placeholder = lang.negPromptPlaceholder;
 
 // 更新選項
+const modelSelect = document.getElementById('model');
+modelSelect.options[0].text = lang.modelDefault;
+modelSelect.options[1].text = lang.modelGemini3Pro;
+
 const qualitySelect = document.getElementById('quality');
 qualitySelect.options[0].text = lang.qualityStandard;
 qualitySelect.options[1].text = lang.qualityHD;
@@ -1572,6 +1591,7 @@ document.getElementById('generateForm').addEventListener('submit', async (e) => 
   e.preventDefault();
 
   // 收集所有參數
+  const model = document.getElementById('model').value;
   const prompt = document.getElementById('prompt').value;
   const size = document.getElementById('imageSize').value;
   const quality = document.getElementById('quality').value;
@@ -1603,6 +1623,7 @@ document.getElementById('generateForm').addEventListener('submit', async (e) => 
   
   // 構建請求體
   const requestBody = {
+  model,
   prompt,
   n,
   size,

@@ -14,17 +14,21 @@
 - 實時 API 請求/響應分析
 - 支持多種圖片尺寸
 - 溫度參數調節
+- **新增**：模型選擇下拉選單（Gemini 3 Pro / Gemini 3.1 Pro）
 - **新增**：品質、風格、種子、Top-P、Top-K 等高級參數
 
 ### ✅ OpenAI Compatible API
 - **POST** `/v1/images/generations` - 圖片生成
 - **GET** `/v1/models` - 模型列表
+- **GET** `/v1/models/{model_id}` - 單一模型資訊
 - 完全兼容 OpenAI SDK
 - 支持 Base64 和 URL 響應格式
+- **新增**：支援多模型選擇（gemini-3-pro-image-preview, gemini-3.1-pro-preview）
 - **新增**：支持更多參數（quality, style, seed, temperature, top_p, top_k, negative_prompt）
 
 ### ✅ REST API
 - **POST** `/api/generate` - 原始 API（含完整響應）
+- **GET** `/api/models` - 完整模型配置列表（供 Web UI 使用）
 - 詳細的請求/響應分析
 - 錯誤追蹤和調試信息
 
@@ -92,7 +96,35 @@ image = response.data[0].b64_json
 | `/` | GET | Web UI 界面 |
 | `/v1/images/generations` | POST | OpenAI 兼容圖片生成 |
 | `/v1/models` | GET | 可用模型列表 |
+| `/v1/models/{model_id}` | GET | 單一模型詳細資訊 |
 | `/api/generate` | POST | 原始 API（含詳細信息）|
+| `/api/models` | GET | 完整模型配置（供 Web UI 使用）|
+| `/api/verify-key` | POST | API Key 驗證（返回可用模型）|
+
+## 🤖 支持的模型
+
+| 模型 ID | 名稱 | 別名 | 描述 |
+|---------|------|------|------|
+| `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | `gemini-3.1-pro`, `gemini-3.1` | Google Gemini 3.1 Pro 圖片生成模型（預覽版）**（預設）**|
+| `gemini-3-pro-image-preview` | Gemini 3 Pro Image Preview | `gemini-3-pro`, `gemini-3-image` | Google Gemini 3 Pro 圖片生成模型（預覽版）|
+
+### 使用不同模型
+
+```python
+# 使用 gemini-3.1-pro-preview 模型（預設）
+response = client.images.generate(
+    prompt="A beautiful sunset",
+    model="gemini-3.1-pro-preview", # 或使用別名 "gemini-3.1"
+    size="1024x1024"
+)
+
+# 使用 gemini-3-pro-image-preview 模型
+response = client.images.generate(
+    prompt="A beautiful sunset",
+    model="gemini-3-pro-image-preview", # 或使用別名 "gemini-3-pro"
+    size="1024x1024"
+)
+```
 
 ## 📝 支持的參數
 
@@ -101,8 +133,9 @@ image = response.data[0].b64_json
 | 參數 | 類型 | 默認值 | 描述 |
 |------|------|--------|------|
 | `prompt` | string | 必填 | 圖片描述提示詞 |
+| `model` | string | "gemini-3-pro-image-preview" | 使用的模型 ID 或別名 |
 | `size` | string | "1024x1024" | 圖片尺寸 |
-| `n` | integer | 1 | 生成圖片數量 (1-4) |
+| `n` | integer | 1 | 生成圖片數量 (1-10) |
 | `quality` | string | "standard" | 圖片品質 ("standard", "hd") |
 | `style` | string | "vivid" | 圖片風格 ("vivid", "natural") |
 
@@ -115,6 +148,30 @@ image = response.data[0].b64_json
 | `top_p` | float | 0.0-1.0 | 核採樣參數 |
 | `top_k` | integer | 1-100 | Top-K 採樣參數 |
 | `negative_prompt` | string | - | 負面提示詞，排除不想要的元素 |
+| `useOfficialFormat` | boolean | true/false | 使用官方 Gemini API 格式（預設 false） |
+
+### 官方 Gemini API 格式說明
+
+當 `useOfficialFormat: true` 時，請求將使用官方 Gemini API 格式：
+
+**官方格式特性：**
+- ✅ `responseModalities`: ["TEXT", "IMAGE"] - 支援文字和圖片輸出
+- ✅ `imageConfig.aspectRatio` - 寬高比設定（1:1, 16:9, 9:16）
+- ✅ `imageConfig.imageSize` - 圖片尺寸（256px, 512px, 1K, 2K, 4K）
+- ✅ `safetySettings` - 關閉所有內容過濾（BLOCK_NONE）
+
+**使用範例：**
+```python
+# 使用官方格式
+response = client.images.generate(
+    model="gemini-3-pro-image-preview",
+    prompt="a beautiful sunset",
+    size="1024x1024",
+    extra_body={
+        "useOfficialFormat": True
+    }
+)
+```
 
 ### 支持的圖片尺寸
 
@@ -215,17 +272,21 @@ MIT License
 - Real-time API request/response analysis
 - Support for multiple image sizes
 - Temperature parameter adjustment
+- **New**: Model selection dropdown (Gemini 3 Pro / Gemini 3.1 Pro)
 - **New**: Quality, style, seed, Top-P, Top-K and other advanced parameters
 
 ### ✅ OpenAI Compatible API
 - **POST** `/v1/images/generations` - Image generation
 - **GET** `/v1/models` - Model list
+- **GET** `/v1/models/{model_id}` - Single model details
 - Fully compatible with OpenAI SDK
 - Support for Base64 and URL response formats
+- **New**: Multi-model support (gemini-3-pro-image-preview, gemini-3.1-pro-preview)
 - **New**: Support for more parameters (quality, style, seed, temperature, top_p, top_k, negative_prompt)
 
 ### ✅ REST API
 - **POST** `/api/generate` - Original API (with full response)
+- **GET** `/api/models` - Full model configuration (for Web UI)
 - Detailed request/response analysis
 - Error tracking and debugging information
 
@@ -293,7 +354,35 @@ For detailed documentation, see: `OPENAI_API_DOCS.md`
 | `/` | GET | Web UI interface |
 | `/v1/images/generations` | POST | OpenAI compatible image generation |
 | `/v1/models` | GET | Available models list |
+| `/v1/models/{model_id}` | GET | Single model details |
 | `/api/generate` | POST | Original API (with details) |
+| `/api/models` | GET | Full model configuration (for Web UI) |
+| `/api/verify-key` | POST | API Key verification (returns available models) |
+
+## 🤖 Supported Models
+
+| Model ID | Name | Aliases | Description |
+|----------|------|---------|-------------|
+| `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | `gemini-3.1-pro`, `gemini-3.1` | Google Gemini 3.1 Pro image generation model (preview) **(Default)** |
+| `gemini-3-pro-image-preview` | Gemini 3 Pro Image Preview | `gemini-3-pro`, `gemini-3-image` | Google Gemini 3 Pro image generation model (preview) |
+
+### Using Different Models
+
+```python
+# Use gemini-3.1-pro-preview model (default)
+response = client.images.generate(
+    prompt="A beautiful sunset",
+    model="gemini-3.1-pro-preview", # or use alias "gemini-3.1"
+    size="1024x1024"
+)
+
+# Use gemini-3-pro-image-preview model
+response = client.images.generate(
+    prompt="A beautiful sunset",
+    model="gemini-3-pro-image-preview", # or use alias "gemini-3-pro"
+    size="1024x1024"
+)
+```
 
 ## 📝 Supported Parameters
 
@@ -302,8 +391,9 @@ For detailed documentation, see: `OPENAI_API_DOCS.md`
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `prompt` | string | Required | Image description prompt |
+| `model` | string | "gemini-3.1-pro-preview" | Model ID or alias to use |
 | `size` | string | "1024x1024" | Image size |
-| `n` | integer | 1 | Number of images to generate (1-4) |
+| `n` | integer | 1 | Number of images to generate (1-10) |
 | `quality` | string | "standard" | Image quality ("standard", "hd") |
 | `style` | string | "vivid" | Image style ("vivid", "natural") |
 
@@ -316,6 +406,30 @@ For detailed documentation, see: `OPENAI_API_DOCS.md`
 | `top_p` | float | 0.0-1.0 | Nucleus sampling parameter |
 | `top_k` | integer | 1-100 | Top-K sampling parameter |
 | `negative_prompt` | string | - | Negative prompt to exclude unwanted elements |
+| `useOfficialFormat` | boolean | true/false | Use official Gemini API format (default: false) |
+
+### Official Gemini API Format
+
+When `useOfficialFormat: true`, the request uses the official Gemini API format:
+
+**Official Format Features:**
+- ✅ `responseModalities`: ["TEXT", "IMAGE"] - Supports text and image output
+- ✅ `imageConfig.aspectRatio` - Aspect ratio setting (1:1, 16:9, 9:16)
+- ✅ `imageConfig.imageSize` - Image size (256px, 512px, 1K, 2K, 4K)
+- ✅ `safetySettings` - Disable all content filtering (BLOCK_NONE)
+
+**Usage Example:**
+```python
+# Use official format
+response = client.images.generate(
+    model="gemini-3-pro-image-preview",
+    prompt="a beautiful sunset",
+    size="1024x1024",
+    extra_body={
+        "useOfficialFormat": True
+    }
+)
+```
 
 ### Supported Image Sizes
 
