@@ -457,12 +457,13 @@ function buildGeminiRequest(params) {
 		});
 	}
 
-	// 基礎 generationConfig
+	// 基礎 generationConfig（始終包含 responseModalities 以確保圖片生成）
 	const generationConfig = {
 		temperature: params.temperature,
 		topP: params.top_p,
 		topK: params.top_k,
-		maxOutputTokens: params.max_output_tokens
+		maxOutputTokens: params.max_output_tokens,
+		responseModalities: RESPONSE_MODALITIES
 	};
 
 	// 添加 seed
@@ -478,8 +479,8 @@ function buildGeminiRequest(params) {
 	// ==================== 混合模式：官方格式 vs 向後兼容 ====================
 	if (params.useOfficialFormat) {
 		// 官方 Gemini API 格式
-		generationConfig.responseModalities = RESPONSE_MODALITIES;
-		
+		// 註：responseModalities 已在基礎 generationConfig 中設定
+
 		// 構建 imageConfig
 		generationConfig.imageConfig = {
 			aspectRatio: ASPECT_RATIO_MAP[params.size] || '1:1',
