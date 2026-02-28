@@ -38,19 +38,31 @@ export default {
       if (url.pathname === '/v1/images/generations' && request.method === 'POST') {
         return await handleOpenAIImageGeneration(request);
       }
-
+  
+      // 模型列表端點
       if (url.pathname === '/v1/models' && request.method === 'GET') {
         return handleModelsEndpoint();
       }
-
+  
+      // 單一模型資訊端點（支援 /v1/models/{model_id}）
+      const modelMatch = url.pathname.match(/^\/v1\/models\/([^\/]+)$/);
+      if (modelMatch && request.method === 'GET') {
+        return handleModelInfo(modelMatch[1]);
+      }
+  
       // 原有的 API 端點
       if (url.pathname === '/api/generate' && request.method === 'POST') {
         return await handleGenerate(request);
       }
-
+  
       // API Key 管理端点
       if (url.pathname === '/api/verify-key' && request.method === 'POST') {
         return handleVerifyKey(request, env);
+      }
+  
+      // 可用模型列表端點（供 Web UI 使用）
+      if (url.pathname === '/api/models' && request.method === 'GET') {
+        return handleApiModelsEndpoint();
       }
 
       // 返回 HTML UI
@@ -120,19 +132,174 @@ function authenticateRequest(request, env) {
   return { success: true };
 }
 
-// 验证 API Key 端点
+// 验证 API Key 端点（包含可用模型資訊）
 function handleVerifyKey(request, env) {
   const authResult = authenticateRequest(request, env);
 
-  return new Response(JSON.stringify({
+  const response = {
     valid: authResult.success,
     message: authResult.success ? 'API key is valid' : authResult.message
+  };
+
+  // 如果驗證成功，返回可用模型資訊
+  if (authResult.success) {
+    response.models = getAvailableModels().map(model => ({
+      id: model.id,
+      name: MODEL_REGISTRY[model.id]?.name || model.id,
+      aliases: MODEL_REGISTRY[model.id]?.aliases || []
+    }));
+    response.default_model = DEFAULT_MODEL;
+  }
+
+  return new Response(JSON.stringify(response), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    }
+  });
+}
+
+// API 模型列表端點（供 Web UI 使用，返回完整配置）
+function handleApiModelsEndpoint() {
+  const models = Object.values(MODEL_REGISTRY)
+    .filter(model => model.status === "active")
+    .map(model => ({
+      id: model.id,
+      name: model.name,
+      description: model.description,
+      owned_by: model.owned_by,
+      aliases: model.aliases,
+      capabilities: model.capabilities,
+      defaults: model.defaults
+    }));
+
+  return new Response(JSON.stringify({
+    success: true,
+    default_model: DEFAULT_MODEL,
+    models: models
   }), {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*'
     }
   });
+}
+
+// ==================== 模型註冊表 ====================
+const MODEL_REGISTRY = {
+  "gemini-3-pro-image-preview": {
+    id: "gemini-3-pro-image-preview",
+    name: "Gemini 3 Pro Image Preview",
+    owned_by: "google",
+    description: "Google Gemini 3 Pro image generation model (preview)",
+    apiUrl: "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent",
+    capabilities: {
+      imageGeneration: true,
+      supportedSizes: ["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792", "2048x2048", "4096x4096"],
+      defaultSize: "1024x1024",
+      maxImages: 10,
+      supportsNegativePrompt: true,
+      supportsSeed: true,
+      supportsStyle: true,
+      supportsQuality: true
+    },
+    defaults: {
+      temperature: 1.0,
+      top_p: 0.95,
+      top_k: 40,
+      max_output_tokens: 8192
+    },
+    aliases: ["gemini-3-pro", "gemini-3-image"],
+    status: "active",
+    created: 1677610602
+  },
+  "gemini-3.1-pro-preview": {
+    id: "gemini-3.1-pro-preview",
+    name: "Gemini 3.1 Pro Preview",
+    owned_by: "google",
+    description: "Google Gemini 3.1 Pro image generation model (preview)",
+    apiUrl: "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3.1-pro-preview:generateContent",
+    capabilities: {
+      imageGeneration: true,
+      supportedSizes: ["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792", "2048x2048", "4096x4096"],
+      defaultSize: "1024x1024",
+      maxImages: 10,
+      supportsNegativePrompt: true,
+      supportsSeed: true,
+      supportsStyle: true,
+      supportsQuality: true
+    },
+    defaults: {
+      temperature: 1.0,
+      top_p: 0.95,
+      top_k: 40,
+      max_output_tokens: 8192
+    },
+    aliases: ["gemini-3.1-pro", "gemini-3.1"],
+    status: "active",
+    created: 1704067200
+  }
+};
+
+// 預設模型
+const DEFAULT_MODEL = "gemini-3-pro-image-preview";
+
+// ==================== 模型管理函數 ====================
+
+// 取得模型配置（支援別名解析）
+function getModelConfig(modelId) {
+  // 直接匹配
+  if (MODEL_REGISTRY[modelId]) {
+    return MODEL_REGISTRY[modelId];
+  }
+  
+  // 別名匹配
+  for (const [id, config] of Object.entries(MODEL_REGISTRY)) {
+    if (config.aliases && config.aliases.includes(modelId)) {
+      return config;
+    }
+  }
+  
+  return null;
+}
+
+// 取得所有可用模型列表
+function getAvailableModels() {
+  return Object.values(MODEL_REGISTRY)
+    .filter(model => model.status === "active")
+    .map(model => ({
+      id: model.id,
+      object: "model",
+      created: model.created,
+      owned_by: model.owned_by,
+      permission: [],
+      root: model.id,
+      parent: null
+    }));
+}
+
+// 驗證模型是否支援指定尺寸
+function validateModelSize(modelConfig, size) {
+  if (!modelConfig || !modelConfig.capabilities || !modelConfig.capabilities.supportedSizes) {
+    return { valid: false, fallback: "1024x1024" };
+  }
+  
+  const supportedSizes = modelConfig.capabilities.supportedSizes;
+  if (supportedSizes.includes(size)) {
+    return { valid: true, size: size };
+  }
+  
+  // 返回模型預設尺寸作為 fallback
+  return {
+    valid: false,
+    fallback: modelConfig.capabilities.defaultSize || "1024x1024",
+    message: `Size ${size} not supported by model ${modelConfig.id}. Using ${modelConfig.capabilities.defaultSize || "1024x1024"} instead.`
+  };
+}
+
+// 取得模型 API URL
+function getModelApiUrl(modelConfig) {
+  return modelConfig?.apiUrl || MODEL_REGISTRY[DEFAULT_MODEL].apiUrl;
 }
 
 // ==================== 參數映射配置 ====================
@@ -152,8 +319,43 @@ const STYLE_MAP = {
 };
 
 const QUALITY_MAP = {
-  'standard': 0.8,
-  'hd': 1.0
+	'standard': 0.8,
+	'hd': 1.0
+};
+
+// ==================== 官方 Gemini API 格式常數 ====================
+
+// 安全設定：關閉所有內容過濾
+const SAFETY_SETTINGS = [
+	{ category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+	{ category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+	{ category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+	{ category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+];
+
+// 回應模式：支援文字和圖片
+const RESPONSE_MODALITIES = ["TEXT", "IMAGE"];
+
+// 寬高比映射（OpenAI 尺寸 -> Gemini aspectRatio）
+const ASPECT_RATIO_MAP = {
+	'256x256': '1:1',
+	'512x512': '1:1',
+	'1024x1024': '1:1',
+	'1792x1024': '16:9',
+	'1024x1792': '9:16',
+	'2048x2048': '1:1',
+	'4096x4096': '1:1'
+};
+
+// 官方格式圖片尺寸映射
+const OFFICIAL_IMAGE_SIZE_MAP = {
+	'256x256': '256px',
+	'512x512': '512px',
+	'1024x1024': '1K',
+	'1792x1024': '1792x1024',
+	'1024x1792': '1024x1792',
+	'2048x2048': '2K',
+	'4096x4096': '4K'
 };
 
 // ==================== 輔助函數 ====================
@@ -170,7 +372,7 @@ function validateSize(size) {
   return validSizes.includes(size) ? size : '1024x1024';
 }
 
-// 參數驗證與標準化
+// 參數驗證與標準化（支援多模型）
 function validateAndNormalizeParams(body) {
   // 驗證必需參數
   if (!body.prompt) {
@@ -180,76 +382,126 @@ function validateAndNormalizeParams(body) {
     throw error;
   }
 
+  // 解析模型配置
+  const requestedModel = body.model || DEFAULT_MODEL;
+  const modelConfig = getModelConfig(requestedModel);
+  
+  // 如果模型不存在，使用預設模型並記錄警告
+  let modelId = requestedModel;
+  let modelWarning = null;
+  if (!modelConfig) {
+    modelWarning = `Model '${requestedModel}' not found. Using default model '${DEFAULT_MODEL}'.`;
+    modelId = DEFAULT_MODEL;
+  } else {
+    modelId = modelConfig.id; // 使用正規化的模型 ID
+  }
+
+  // 取得模型預設值
+  const modelDefaults = modelConfig?.defaults || MODEL_REGISTRY[DEFAULT_MODEL].defaults;
+  const modelCapabilities = modelConfig?.capabilities || MODEL_REGISTRY[DEFAULT_MODEL].capabilities;
+
+  // 驗證尺寸
+  const requestedSize = body.size || modelCapabilities.defaultSize;
+  const sizeValidation = modelConfig ? validateModelSize(modelConfig, requestedSize) : { valid: true, size: validateSize(requestedSize) };
+  const finalSize = sizeValidation.valid ? sizeValidation.size : sizeValidation.fallback;
+
   return {
-    // 標準 OpenAI 參數
-    prompt: body.prompt,
-    n: clamp(body.n || 1, 1, 10),
-    size: validateSize(body.size),
-    response_format: body.response_format || 'b64_json',
-    model: body.model || 'gemini-3-pro-image-preview',
-
-    // 新增 OpenAI 參數
-    quality: body.quality || 'standard',
-    style: body.style || 'natural',
-    seed: body.seed !== undefined ? Math.floor(clamp(body.seed, 0, 2147483647)) : undefined,
-
-    // Gemini 擴展參數
-    temperature: clamp(body.temperature ?? 1.0, 0, 2),
-    top_p: clamp(body.top_p ?? 0.95, 0, 1),
-    top_k: clamp(body.top_k ?? 40, 1, 100),
-    max_output_tokens: body.max_output_tokens || 8192,
-    negative_prompt: body.negative_prompt || null
+  	// 標準 OpenAI 參數
+  	prompt: body.prompt,
+  	n: clamp(body.n || 1, 1, modelCapabilities.maxImages || 10),
+  	size: finalSize,
+  	response_format: body.response_format || 'b64_json',
+  	model: modelId,
+ 
+  	// 新增 OpenAI 參數
+  	quality: body.quality || 'standard',
+  	style: body.style || 'natural',
+  	seed: body.seed !== undefined ? Math.floor(clamp(body.seed, 0, 2147483647)) : undefined,
+ 
+  	// Gemini 擴展參數（使用模型預設值）
+  	temperature: clamp(body.temperature ?? modelDefaults.temperature, 0, 2),
+  	top_p: clamp(body.top_p ?? modelDefaults.top_p, 0, 1),
+  	top_k: clamp(body.top_k ?? modelDefaults.top_k, 1, 100),
+  	max_output_tokens: body.max_output_tokens || modelDefaults.max_output_tokens,
+  	negative_prompt: body.negative_prompt || null,
+ 
+  	// 官方格式開關（支援駝峰式和蛇形式）
+  	useOfficialFormat: body.useOfficialFormat === true || body.use_official_format === true,
+ 
+  	// 模型配置資訊
+  	modelConfig: modelConfig || MODEL_REGISTRY[DEFAULT_MODEL],
+  	modelWarning: modelWarning,
+  	sizeWarning: sizeValidation.message || null
   };
-}
+ }
 
-// 構建 Gemini 請求
+// 構建 Gemini 請求（支援混合模式：向後兼容 + 官方格式）
 function buildGeminiRequest(params) {
-  // 構建提示詞（包含 style 前綴）
-  let promptText = '';
-  if (STYLE_MAP[params.style]) {
-    promptText += STYLE_MAP[params.style];
-  }
-  promptText += `Generate an image: ${params.prompt}`;
+	// 構建提示詞（包含 style 前綴）
+	let promptText = '';
+	if (STYLE_MAP[params.style]) {
+		promptText += STYLE_MAP[params.style];
+	}
+	promptText += `Generate an image: ${params.prompt}`;
 
-  // 添加尺寸信息
-  const geminiSize = SIZE_MAP[params.size] || '2K';
-  promptText += `. Image size: ${geminiSize}.`;
+	// 構建 contents
+	const contents = [{
+		role: 'user',
+		parts: [{ text: promptText }]
+	}];
 
-  // 構建 contents
-  const contents = [{
-    role: 'user',
-    parts: [{ text: promptText }]
-  }];
+	// 添加 negative_prompt
+	if (params.negative_prompt) {
+		contents[0].parts.push({
+			text: `Negative prompt: ${params.negative_prompt}`
+		});
+	}
 
-  // 添加 negative_prompt
-  if (params.negative_prompt) {
-    contents[0].parts.push({
-      text: `Negative prompt: ${params.negative_prompt}`
-    });
-  }
+	// 基礎 generationConfig
+	const generationConfig = {
+		temperature: params.temperature,
+		topP: params.top_p,
+		topK: params.top_k,
+		maxOutputTokens: params.max_output_tokens
+	};
 
-  // 構建 generationConfig
-  const generationConfig = {
-    temperature: params.temperature,
-    topP: params.top_p,
-    topK: params.top_k,
-    maxOutputTokens: params.max_output_tokens
-  };
+	// 添加 seed
+	if (params.seed !== undefined) {
+		generationConfig.seed = params.seed;
+	}
 
-  // 添加 seed
-  if (params.seed !== undefined) {
-    generationConfig.seed = params.seed;
-  }
+	// 根據 quality 調整參數
+	if (params.quality === 'hd') {
+		generationConfig.temperature = Math.max(generationConfig.temperature, QUALITY_MAP['hd']);
+	}
 
-  // 根據 quality 調整參數
-  if (params.quality === 'hd') {
-    generationConfig.temperature = Math.max(generationConfig.temperature, QUALITY_MAP['hd']);
-  }
+	// ==================== 混合模式：官方格式 vs 向後兼容 ====================
+	if (params.useOfficialFormat) {
+		// 官方 Gemini API 格式
+		generationConfig.responseModalities = RESPONSE_MODALITIES;
+		
+		// 構建 imageConfig
+		generationConfig.imageConfig = {
+			aspectRatio: ASPECT_RATIO_MAP[params.size] || '1:1',
+			imageSize: OFFICIAL_IMAGE_SIZE_MAP[params.size] || '2K'
+		};
 
-  return {
-    contents,
-    generationConfig
-  };
+		// 返回官方格式請求（包含 safetySettings）
+		return {
+			contents,
+			generationConfig,
+			safetySettings: SAFETY_SETTINGS
+		};
+	} else {
+		// 向後兼容模式：將尺寸信息嵌入提示詞
+		const geminiSize = SIZE_MAP[params.size] || '2K';
+		contents[0].parts[0].text += `. Image size: ${geminiSize}.`;
+
+		return {
+			contents,
+			generationConfig
+		};
+	}
 }
 
 // 從 Gemini 響應中提取圖片數據
@@ -310,14 +562,14 @@ async function handleOpenAIImageGeneration(request) {
   try {
     const body = await request.json();
 
-    // 參數驗證與標準化
+    // 參數驗證與標準化（支援多模型）
     const params = validateAndNormalizeParams(body);
 
     // 構建 Gemini 請求
     const geminiRequest = buildGeminiRequest(params);
 
-    // Gemini API URL
-    const apiUrl = "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent";
+    // 從模型配置取得 API URL
+    const apiUrl = getModelApiUrl(params.modelConfig);
 
     // 調用 Gemini API
     const response = await fetch(apiUrl, {
@@ -337,6 +589,16 @@ async function handleOpenAIImageGeneration(request) {
     if (imageData) {
       // 構建 OpenAI 格式響應
       const openAIResponse = buildOpenAIResponse(imageData, params);
+
+      // 如果有警告訊息，加入響應中
+      if (params.modelWarning || params.sizeWarning) {
+        openAIResponse.warnings = [];
+        if (params.modelWarning) openAIResponse.warnings.push(params.modelWarning);
+        if (params.sizeWarning) openAIResponse.warnings.push(params.sizeWarning);
+      }
+
+      // 加入模型資訊
+      openAIResponse.model = params.model;
 
       return new Response(JSON.stringify(openAIResponse), {
         headers: {
@@ -380,23 +642,58 @@ async function handleOpenAIImageGeneration(request) {
   }
 }
 
+// ==================== 模型列表端點 ====================
 function handleModelsEndpoint() {
   const models = {
     object: "list",
-    data: [
-      {
-        id: "gemini-3-pro-image-preview",
-        object: "model",
-        created: 1677610602,
-        owned_by: "google",
-        permission: [],
-        root: "gemini-3-pro-image-preview",
-        parent: null
-      }
-    ]
+    data: getAvailableModels()
   };
 
   return new Response(JSON.stringify(models), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    }
+  });
+}
+
+// ==================== 單一模型資訊端點 ====================
+function handleModelInfo(modelId) {
+  const modelConfig = getModelConfig(modelId);
+  
+  if (!modelConfig) {
+    return new Response(JSON.stringify({
+      error: {
+        message: `Model '${modelId}' not found`,
+        type: "invalid_request_error",
+        param: "model",
+        code: "model_not_found"
+      }
+    }), {
+      status: 404,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  }
+
+  const modelInfo = {
+    id: modelConfig.id,
+    object: "model",
+    created: modelConfig.created,
+    owned_by: modelConfig.owned_by,
+    permission: [],
+    root: modelConfig.id,
+    parent: null,
+    // 擴展資訊
+    name: modelConfig.name,
+    description: modelConfig.description,
+    capabilities: modelConfig.capabilities,
+    aliases: modelConfig.aliases
+  };
+
+  return new Response(JSON.stringify(modelInfo), {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*'
@@ -408,26 +705,9 @@ function handleModelsEndpoint() {
 async function handleGenerate(request) {
   try {
     const body = await request.json();
-    
-    // 使用統一的參數驗證與標準化
-    const params = {
-      prompt: body.prompt,
-      n: clamp(body.n || 1, 1, 10),
-      size: validateSize(body.size || body.imageSize ? (body.size || body.imageSize) : '1024x1024'),
-      response_format: body.response_format || 'b64_json',
-      model: body.model || 'gemini-3-pro-image-preview',
-      quality: body.quality || 'standard',
-      style: body.style || 'natural',
-      seed: body.seed !== undefined ? Math.floor(clamp(body.seed, 0, 2147483647)) : undefined,
-      temperature: clamp(body.temperature ?? 1.0, 0, 2),
-      top_p: clamp(body.top_p ?? 0.95, 0, 1),
-      top_k: clamp(body.top_k ?? 40, 1, 100),
-      max_output_tokens: body.max_output_tokens || 8192,
-      negative_prompt: body.negative_prompt || null
-    };
 
     // 驗證必需參數
-    if (!params.prompt) {
+    if (!body.prompt) {
       return new Response(JSON.stringify({
         success: false,
         error: "Missing required parameter: 'prompt'"
@@ -440,10 +720,14 @@ async function handleGenerate(request) {
       });
     }
 
+    // 使用統一的參數驗證與標準化（支援多模型）
+    const params = validateAndNormalizeParams(body);
+
     // 構建 Gemini 請求
     const geminiRequest = buildGeminiRequest(params);
 
-    const apiUrl = "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models/gemini-3-pro-image-preview:generateContent";
+    // 從模型配置取得 API URL
+    const apiUrl = getModelApiUrl(params.modelConfig);
 
     const startTime = Date.now();
 
@@ -462,10 +746,12 @@ async function handleGenerate(request) {
     // 提取圖片數據
     const imageData = extractImageData(responseData);
 
-    return new Response(JSON.stringify({
+    // 構建響應
+    const resultResponse = {
       success: response.ok,
       status: response.status,
       duration: duration,
+      model: params.model,
       imageData: imageData ? imageData.fullDataUrl : null,
       request: {
         url: apiUrl,
@@ -487,7 +773,16 @@ async function handleGenerate(request) {
         top_k: params.top_k,
         negative_prompt: params.negative_prompt
       }
-    }), {
+    };
+
+    // 添加警告訊息（如果有）
+    if (params.modelWarning || params.sizeWarning) {
+      resultResponse.warnings = [];
+      if (params.modelWarning) resultResponse.warnings.push(params.modelWarning);
+      if (params.sizeWarning) resultResponse.warnings.push(params.sizeWarning);
+    }
+
+    return new Response(JSON.stringify(resultResponse), {
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
