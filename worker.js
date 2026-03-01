@@ -36,7 +36,7 @@ export default {
 
       // OpenAI-compatible API endpoints
       if (url.pathname === '/v1/images/generations' && request.method === 'POST') {
-        return await handleOpenAIImageGeneration(request);
+      return await handleOpenAIImageGeneration(request, env);
       }
   
       // 模型列表端點
@@ -52,7 +52,7 @@ export default {
   
       // 原有的 API 端點
       if (url.pathname === '/api/generate' && request.method === 'POST') {
-        return await handleGenerate(request);
+      return await handleGenerate(request, env);
       }
   
       // API Key 管理端点
@@ -62,7 +62,12 @@ export default {
   
       // 可用模型列表端點（供 Web UI 使用）
       if (url.pathname === '/api/models' && request.method === 'GET') {
-        return handleApiModelsEndpoint();
+      return handleApiModelsEndpoint();
+      }
+      
+      // 上游狀態檢查端點
+      if (url.pathname === '/api/upstreams' && request.method === 'GET') {
+      return handleUpstreamsStatus();
       }
 
       // 返回 HTML UI
@@ -183,6 +188,199 @@ function handleApiModelsEndpoint() {
       'Access-Control-Allow-Origin': '*'
     }
   });
+}
+
+// ==================== 上游配置 ====================
+const UPSTREAMS = {
+  "appmedo": {
+    id: "appmedo",
+    name: "AppMedo Primary",
+    type: "gemini-proxy",
+    baseUrl: "https://api-integrations.appmedo.com/app-7r29gu4xs001/api-Xa6JZ58oPMEa/v1beta/models",
+    apiKey: null, // 使用環境變數 API_KEY
+    headers: {
+      "Content-Type": "application/json"
+    },
+    priority: 1,
+    status: "active",
+    healthCheck: null,
+    lastError: null,
+    errorCount: 0,
+    models: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]
+  },
+  "supabase": {
+    id: "supabase",
+    name: "Supabase Backup",
+    type: "openai-compatible",
+    baseUrl: "https://gjosebfngzowbcrwzxnw.supabase.co/functions/v1/openai-compatible",
+    apiKey: "nb_QkIB2xAU3NPr3zCNNhHns4qj4YP9Ij763dUY8hG0SrrOMDWx",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    priority: 2,
+    status: "active",
+    healthCheck: null,
+    lastError: null,
+    errorCount: 0,
+    models: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]
+  }
+};
+
+// 上游狀態追蹤（運行時狀態）
+const upstreamStatus = {
+  "appmedo": { available: true, lastCheck: 0, consecutiveErrors: 0 },
+  "supabase": { available: true, lastCheck: 0, consecutiveErrors: 0 }
+};
+
+// ==================== 上游管理函數 ====================
+
+// 取得上游配置
+function getUpstreamConfig(upstreamId) {
+  return UPSTREAMS[upstreamId] || null;
+}
+
+// 取得模型可用的上游列表（按優先級排序）
+function getAvailableUpstreamsForModel(modelId) {
+  return Object.values(UPSTREAMS)
+    .filter(upstream =>
+      upstream.status === "active" &&
+      upstream.models.includes(modelId) &&
+      upstreamStatus[upstream.id].available
+    )
+    .sort((a, b) => a.priority - b.priority);
+}
+
+// 標記上游錯誤
+function markUpstreamError(upstreamId, error) {
+  if (upstreamStatus[upstreamId]) {
+    upstreamStatus[upstreamId].consecutiveErrors++;
+    UPSTREAMS[upstreamId].lastError = error;
+    UPSTREAMS[upstreamId].errorCount++;
+    
+    // 連續 3 次錯誤後暫時標記為不可用（5 分鐘）
+    if (upstreamStatus[upstreamId].consecutiveErrors >= 3) {
+      upstreamStatus[upstreamId].available = false;
+      console.log(`Upstream ${upstreamId} marked as unavailable due to consecutive errors`);
+    }
+  }
+}
+
+// 標記上游成功
+function markUpstreamSuccess(upstreamId) {
+  if (upstreamStatus[upstreamId]) {
+    upstreamStatus[upstreamId].consecutiveErrors = 0;
+    upstreamStatus[upstreamId].available = true;
+    upstreamStatus[upstreamId].lastCheck = Date.now();
+  }
+}
+
+// 建構上游 API URL
+function buildUpstreamUrl(upstream, modelId) {
+  if (upstream.type === "gemini-proxy") {
+    return `${upstream.baseUrl}/${modelId}:generateContent`;
+  } else if (upstream.type === "openai-compatible") {
+    // OpenAI 兼容格式使用 /v1/images/generations
+    return `${upstream.baseUrl}/v1/images/generations`;
+  }
+  return upstream.baseUrl;
+}
+
+// 取得上游 API Key
+function getUpstreamApiKey(upstream, env) {
+  if (upstream.apiKey) {
+    return upstream.apiKey;
+  }
+  // 使用環境變數
+  return env?.API_KEY || "";
+}
+
+// 帶故障轉移的 fetch 函數
+async function fetchWithFallback(modelId, requestBody, env, debugMode = false) {
+  const upstreams = getAvailableUpstreamsForModel(modelId);
+  
+  if (upstreams.length === 0) {
+    // 嘗試重置所有上游狀態
+    Object.keys(upstreamStatus).forEach(id => {
+      upstreamStatus[id].available = true;
+      upstreamStatus[id].consecutiveErrors = 0;
+    });
+    
+    // 重新獲取上游列表
+    const retryUpstreams = getAvailableUpstreamsForModel(modelId);
+    if (retryUpstreams.length === 0) {
+      throw new Error("No available upstreams for model: " + modelId);
+    }
+    return tryUpstreams(retryUpstreams, modelId, requestBody, env, debugMode);
+  }
+  
+  return tryUpstreams(upstreams, modelId, requestBody, env, debugMode);
+}
+
+// 嘗試多個上游
+async function tryUpstreams(upstreams, modelId, requestBody, env, debugMode) {
+  const errors = [];
+  
+  for (const upstream of upstreams) {
+    try {
+      const url = buildUpstreamUrl(upstream, modelId);
+      const apiKey = getUpstreamApiKey(upstream, env);
+      
+      // 根據上游類型建構請求
+      let fetchOptions;
+      if (upstream.type === "openai-compatible") {
+        // OpenAI 兼容格式
+        fetchOptions = {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify(requestBody.openaiFormat || requestBody)
+        };
+      } else {
+        // Gemini 代理格式
+        fetchOptions = {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify(requestBody.geminiFormat || requestBody)
+        };
+      }
+      
+      if (debugMode) {
+        console.log(`Trying upstream: ${upstream.id}`, { url, upstream: upstream.type });
+      }
+      
+      const response = await fetch(url, fetchOptions);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Upstream ${upstream.id} returned ${response.status}: ${errorText}`);
+      }
+      
+      const data = await response.json();
+      
+      // 標記成功
+      markUpstreamSuccess(upstream.id);
+      
+      return {
+        success: true,
+        data: data,
+        upstream: upstream.id,
+        upstreamType: upstream.type
+      };
+      
+    } catch (error) {
+      console.error(`Upstream ${upstream.id} failed:`, error.message);
+      markUpstreamError(upstream.id, error.message);
+      errors.push({ upstream: upstream.id, error: error.message });
+    }
+  }
+  
+  // 所有上游都失敗
+  throw new Error(`All upstreams failed for model ${modelId}. Errors: ${JSON.stringify(errors)}`);
 }
 
 // ==================== 模型註冊表 ====================
@@ -647,157 +845,173 @@ function buildOpenAIResponse(imageData, params) {
 // ==================== OpenAI 兼容圖片生成端點 ====================
 // 方案 F：新增 Debug 模式
 // 方案 H：新增錯誤處理改進
-async function handleOpenAIImageGeneration(request) {
-	try {
-		const body = await request.json();
+// 混合方案 B+C：支援多上游故障轉移
+async function handleOpenAIImageGeneration(request, env) {
+try {
+const body = await request.json();
 
-		// 參數驗證與標準化（支援多模型）
-		const params = validateAndNormalizeParams(body);
+// 參數驗證與標準化（支援多模型）
+const params = validateAndNormalizeParams(body);
 
-		// 構建 Gemini 請求
-		const geminiRequest = buildGeminiRequest(params);
+// 構建 Gemini 請求
+const geminiRequest = buildGeminiRequest(params);
 
-		// 從模型配置取得 API URL
-		const apiUrl = getModelApiUrl(params.modelConfig);
+// 構建 OpenAI 格式請求（用於 OpenAI 兼容上游）
+const openAIFormatRequest = {
+model: params.model,
+prompt: params.prompt,
+n: params.n || 1,
+size: params.size,
+response_format: params.response_format || "url"
+};
 
-		// 調用 Gemini API
-		const response = await fetch(apiUrl, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-			},
-			body: JSON.stringify(geminiRequest)
-		});
+// 使用帶故障轉移的 fetch
+const result = await fetchWithFallback(
+params.model,
+{
+geminiFormat: geminiRequest,
+openaiFormat: openAIFormatRequest
+},
+env,
+params.debug
+);
 
-		const geminiResponse = await response.json();
+const geminiResponse = result.data;
+const usedUpstream = result.upstream;
+const upstreamType = result.upstreamType;
 
-		// 方案 F：Debug 模式 - 返回完整請求/響應資訊
-		if (params.debug) {
-			return new Response(JSON.stringify({
-				debug: true,
-				request: {
-					url: apiUrl,
-					body: geminiRequest
-				},
-				response: {
-					status: response.status,
-					statusText: response.statusText,
-					body: geminiResponse
-				},
-				params: {
-					model: params.model,
-					size: params.size,
-					useOfficialFormat: params.useOfficialFormat,
-					responseModalities: geminiRequest.generationConfig?.responseModalities
-				}
-			}), {
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*'
-				}
-			});
-		}
+// 方案 F：Debug 模式 - 返回完整請求/響應資訊
+if (params.debug) {
+return new Response(JSON.stringify({
+debug: true,
+upstream: {
+id: usedUpstream,
+type: upstreamType
+},
+request: {
+body: geminiRequest
+},
+response: {
+body: geminiResponse
+},
+params: {
+model: params.model,
+size: params.size,
+useOfficialFormat: params.useOfficialFormat,
+responseModalities: geminiRequest.generationConfig?.responseModalities
+}
+}), {
+headers: {
+'Content-Type': 'application/json',
+'Access-Control-Allow-Origin': '*'
+}
+});
+}
 
-		// 提取圖片數據
-		const imageData = extractImageData(geminiResponse);
+// 提取圖片數據
+const imageData = extractImageData(geminiResponse);
 
-		// 方案 H：檢查是否有錯誤
-		if (imageData && imageData.error) {
-			// 根據錯誤類型返回不同的錯誤訊息
-			let errorMessage = imageData.error;
-			let errorType = imageData.errorType || "api_error";
-			
-			// 針對空 base64 數據的特殊處理
-			if (imageData.errorType === "empty_base64") {
-				errorMessage = `API returned empty image data. This may indicate: ` +
-					`1) The proxy API does not support 'responseModalities' parameter, ` +
-					`2) The model is not available for image generation, or ` +
-					`3) Authentication/quota issues. ` +
-					`Try using debug:true to see full response details. ` +
-					`Format detected: ${imageData.format}`;
-			}
+// 方案 H：檢查是否有錯誤
+if (imageData && imageData.error) {
+// 根據錯誤類型返回不同的錯誤訊息
+let errorMessage = imageData.error;
+let errorType = imageData.errorType || "api_error";
 
-			return new Response(JSON.stringify({
-				error: {
-					message: errorMessage,
-					type: errorType,
-					param: null,
-					code: response.status,
-					debug_info: {
-						errorType: imageData.errorType,
-						format: imageData.format,
-						rawText: imageData.rawText ? imageData.rawText.substring(0, 200) + '...' : undefined
-					}
-				}
-			}), {
-				status: response.status || 500,
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*'
-				}
-			});
-		}
+// 針對空 base64 數據的特殊處理
+if (imageData.errorType === "empty_base64") {
+errorMessage = `API returned empty image data. This may indicate: ` +
+`1) The proxy API does not support 'responseModalities' parameter, ` +
+`2) The model is not available for image generation, or ` +
+`3) Authentication/quota issues. ` +
+`Try using debug:true to see full response details. ` +
+`Format detected: ${imageData.format}`;
+}
 
-		if (imageData && imageData.base64Only) {
-			// 構建 OpenAI 格式響應
-			const openAIResponse = buildOpenAIResponse(imageData, params);
+return new Response(JSON.stringify({
+error: {
+message: errorMessage,
+type: errorType,
+param: null,
+code: 500,
+debug_info: {
+errorType: imageData.errorType,
+format: imageData.format,
+rawText: imageData.rawText ? imageData.rawText.substring(0, 200) + '...' : undefined,
+upstream: usedUpstream
+}
+}
+}), {
+status: 500,
+headers: {
+'Content-Type': 'application/json',
+'Access-Control-Allow-Origin': '*'
+}
+});
+}
 
-			// 如果有警告訊息，加入響應中
-			if (params.modelWarning || params.sizeWarning) {
-				openAIResponse.warnings = [];
-				if (params.modelWarning) openAIResponse.warnings.push(params.modelWarning);
-				if (params.sizeWarning) openAIResponse.warnings.push(params.sizeWarning);
-			}
+if (imageData && imageData.base64Only) {
+// 構建 OpenAI 格式響應
+const openAIResponse = buildOpenAIResponse(imageData, params);
 
-			// 加入模型資訊
-			openAIResponse.model = params.model;
+// 如果有警告訊息，加入響應中
+if (params.modelWarning || params.sizeWarning) {
+openAIResponse.warnings = [];
+if (params.modelWarning) openAIResponse.warnings.push(params.modelWarning);
+if (params.sizeWarning) openAIResponse.warnings.push(params.sizeWarning);
+}
 
-			// 方案 G：記錄圖片格式
-			if (imageData.format) {
-				openAIResponse.format = imageData.format;
-			}
+// 加入模型資訊
+openAIResponse.model = params.model;
 
-			return new Response(JSON.stringify(openAIResponse), {
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*'
-				}
-			});
-		} else {
-			return new Response(JSON.stringify({
-				error: {
-					message: geminiResponse.error?.message || "Failed to generate image - no valid image data found",
-					type: "api_error",
-					param: null,
-					code: response.status
-				}
-			}), {
-				status: response.status || 500,
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*'
-				}
-			});
-		}
+// 加入上游資訊
+openAIResponse.upstream = usedUpstream;
 
-	} catch (error) {
-		console.error('OpenAI API Error:', error);
-		return new Response(JSON.stringify({
-			error: {
-				message: error.message,
-				type: error.type || "server_error",
-				param: error.param || null,
-				code: null
-			}
-		}), {
-			status: 400,
-			headers: {
-				'Content-Type': 'application/json',
-				'Access-Control-Allow-Origin': '*'
-      }
-    });
-  }
+// 方案 G：記錄圖片格式
+if (imageData.format) {
+openAIResponse.format = imageData.format;
+}
+
+return new Response(JSON.stringify(openAIResponse), {
+headers: {
+'Content-Type': 'application/json',
+'Access-Control-Allow-Origin': '*'
+}
+});
+} else {
+return new Response(JSON.stringify({
+error: {
+message: geminiResponse.error?.message || "Failed to generate image - no valid image data found",
+type: "api_error",
+param: null,
+code: 500,
+upstream: usedUpstream
+}
+}), {
+status: 500,
+headers: {
+'Content-Type': 'application/json',
+'Access-Control-Allow-Origin': '*'
+}
+});
+}
+
+} catch (error) {
+console.error('OpenAI API Error:', error);
+return new Response(JSON.stringify({
+error: {
+message: error.message,
+type: error.type || "server_error",
+param: error.param || null,
+code: null
+}
+}), {
+status: 400,
+headers: {
+'Content-Type': 'application/json',
+'Access-Control-Allow-Origin': '*'
+}
+});
+}
 }
 
 // ==================== 模型列表端點 ====================
@@ -859,108 +1073,146 @@ function handleModelInfo(modelId) {
   });
 }
 
-// ==================== 原始 API 端點（支持完整參數）====================
-async function handleGenerate(request) {
-  try {
-    const body = await request.json();
+// ==================== 上游狀態端點 ====================
+function handleUpstreamsStatus() {
+  const upstreamsInfo = Object.values(UPSTREAMS).map(upstream => ({
+    id: upstream.id,
+    name: upstream.name,
+    type: upstream.type,
+    priority: upstream.priority,
+    status: upstream.status,
+    available: upstreamStatus[upstream.id]?.available ?? true,
+    consecutiveErrors: upstreamStatus[upstream.id]?.consecutiveErrors ?? 0,
+    errorCount: upstream.errorCount,
+    lastError: upstream.lastError,
+    models: upstream.models
+  }));
 
-    // 驗證必需參數
-    if (!body.prompt) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: "Missing required parameter: 'prompt'"
-      }), {
-        status: 400,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
+  return new Response(JSON.stringify({
+    object: "list",
+    data: upstreamsInfo,
+    timestamp: Date.now()
+  }), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
     }
+  });
+}
 
-    // 使用統一的參數驗證與標準化（支援多模型）
-    const params = validateAndNormalizeParams(body);
+// ==================== 原始 API 端點（支持完整參數）===================
+// 混合方案 B+C：支援多上游故障轉移
+async function handleGenerate(request, env) {
+try {
+const body = await request.json();
 
-    // 構建 Gemini 請求
-    const geminiRequest = buildGeminiRequest(params);
+// 驗證必需參數
+if (!body.prompt) {
+return new Response(JSON.stringify({
+success: false,
+error: "Missing required parameter: 'prompt'"
+}), {
+status: 400,
+headers: {
+'Content-Type': 'application/json',
+'Access-Control-Allow-Origin': '*'
+}
+});
+}
 
-    // 從模型配置取得 API URL
-    const apiUrl = getModelApiUrl(params.modelConfig);
+// 使用統一的參數驗證與標準化（支援多模型）
+const params = validateAndNormalizeParams(body);
 
-    const startTime = Date.now();
+// 構建 Gemini 請求
+const geminiRequest = buildGeminiRequest(params);
 
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      },
-      body: JSON.stringify(geminiRequest)
-    });
+// 構建 OpenAI 格式請求（用於 OpenAI 兼容上游）
+const openAIFormatRequest = {
+model: params.model,
+prompt: params.prompt,
+n: params.n || 1,
+size: params.size,
+response_format: params.response_format || "url"
+};
 
-    const responseData = await response.json();
-    const duration = Date.now() - startTime;
+const startTime = Date.now();
 
-    // 提取圖片數據
-    const imageData = extractImageData(responseData);
+// 使用帶故障轉移的 fetch
+const result = await fetchWithFallback(
+params.model,
+{
+geminiFormat: geminiRequest,
+openaiFormat: openAIFormatRequest
+},
+env,
+params.debug
+);
 
-    // 構建響應
-    const resultResponse = {
-      success: response.ok,
-      status: response.status,
-      duration: duration,
-      model: params.model,
-      imageData: imageData ? imageData.fullDataUrl : null,
-      request: {
-        url: apiUrl,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: geminiRequest
-      },
-      response: responseData,
-      // 添加參數信息
-      params: {
-        prompt: params.prompt,
-        n: params.n,
-        size: params.size,
-        quality: params.quality,
-        style: params.style,
-        seed: params.seed,
-        temperature: params.temperature,
-        top_p: params.top_p,
-        top_k: params.top_k,
-        negative_prompt: params.negative_prompt
-      }
-    };
+const responseData = result.data;
+const usedUpstream = result.upstream;
+const upstreamType = result.upstreamType;
+const duration = Date.now() - startTime;
 
-    // 添加警告訊息（如果有）
-    if (params.modelWarning || params.sizeWarning) {
-      resultResponse.warnings = [];
-      if (params.modelWarning) resultResponse.warnings.push(params.modelWarning);
-      if (params.sizeWarning) resultResponse.warnings.push(params.sizeWarning);
-    }
+// 提取圖片數據
+const imageData = extractImageData(responseData);
 
-    return new Response(JSON.stringify(resultResponse), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
+// 構建響應
+const resultResponse = {
+success: true,
+status: 200,
+duration: duration,
+model: params.model,
+upstream: usedUpstream,
+upstreamType: upstreamType,
+imageData: imageData ? imageData.fullDataUrl : null,
+request: {
+method: 'POST',
+body: geminiRequest
+},
+response: responseData,
+// 添加參數信息
+params: {
+prompt: params.prompt,
+n: params.n,
+size: params.size,
+quality: params.quality,
+style: params.style,
+seed: params.seed,
+temperature: params.temperature,
+top_p: params.top_p,
+top_k: params.top_k,
+negative_prompt: params.negative_prompt
+}
+};
 
-  } catch (error) {
-    console.error('Generate API Error:', error);
-    return new Response(JSON.stringify({
-      success: false,
-      error: error.message,
-      stack: error.stack
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
-  }
+// 添加警告訊息（如果有）
+if (params.modelWarning || params.sizeWarning) {
+resultResponse.warnings = [];
+if (params.modelWarning) resultResponse.warnings.push(params.modelWarning);
+if (params.sizeWarning) resultResponse.warnings.push(params.sizeWarning);
+}
+
+return new Response(JSON.stringify(resultResponse), {
+headers: {
+'Content-Type': 'application/json',
+'Access-Control-Allow-Origin': '*'
+}
+});
+
+} catch (error) {
+console.error('Generate API Error:', error);
+return new Response(JSON.stringify({
+success: false,
+error: error.message,
+stack: error.stack
+}), {
+status: 500,
+headers: {
+'Content-Type': 'application/json',
+'Access-Control-Allow-Origin': '*'
+}
+});
+}
 }
 
 function getHTML() {

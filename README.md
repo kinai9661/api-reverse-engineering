@@ -7,6 +7,35 @@
 <a name="中文"></a>
 ## 中文文檔
 
+## 📋 最新更新
+
+### v2.2.0 (2026-03-01)
+- ✨ **新增多上游負載平衡（故障轉移機制）**
+- 新增 `UPSTREAMS` 配置支援多個 API 上游
+- 新增 `fetchWithFallback()` 自動故障轉移函數
+- 新增 `/api/upstreams` 端點查看上游狀態
+- 支援 AppMedo（主要）+ Supabase（備用）雙上游
+- 連續 3 次錯誤後自動切換到備用上游
+- 響應中新增 `upstream` 欄位顯示使用的上游
+- 🔧 **智能路由：按優先級自動選擇可用上游**
+
+### v2.1.0 (2026-02-28)
+- ✨ **新增官方 Gemini 3.1 Flash API 格式支援**
+- 新增 `aspectRatio: "21:9"` 寬螢幕比例
+- 新增 `personGeneration` 人物生成控制（allow_all, allow_adult, dont_allow）
+- 新增 `outputMimeType` 輸出格式（image/png, image/jpeg, image/webp）
+- 新增 `numberOfImages` 映射到 `imageConfig` 內
+- `seed` 參數移至 `imageConfig` 內（符合官方格式）
+- 🔧 **預設模型更改為 `gemini-3.1-flash-image-preview`**
+- 📝 **更新文檔說明新參數使用方式**
+
+### v2.0.0 (2026-02-27)
+- ✨ 新增多模型支援（MODEL_REGISTRY）
+- ✨ 新增 Web UI 模型選擇下拉選單
+- ✨ 新增 Debug 模式（完整請求/響應分析）
+- ✨ 新增官方 Gemini API 格式支援
+- 🐛 修復圖片生成問題（空 base64 數據）
+
 ## 🎉 功能特性
 
 ### ✅ Web UI
@@ -14,8 +43,9 @@
 - 實時 API 請求/響應分析
 - 支持多種圖片尺寸
 - 溫度參數調節
-- **新增**：模型選擇下拉選單（Gemini 3 Pro / Gemini 3.1 Pro）
+- **新增**：模型選擇下拉選單（Gemini 3 Pro / Gemini 3.1 Flash）
 - **新增**：品質、風格、種子、Top-P、Top-K 等高級參數
+- **新增**：Debug 模式開關
 
 ### ✅ OpenAI Compatible API
 - **POST** `/v1/images/generations` - 圖片生成
@@ -23,14 +53,22 @@
 - **GET** `/v1/models/{model_id}` - 單一模型資訊
 - 完全兼容 OpenAI SDK
 - 支持 Base64 和 URL 響應格式
-- **新增**：支援多模型選擇（gemini-3-pro-image-preview, gemini-3.1-pro-preview）
+- **新增**：支援多模型選擇（gemini-3-pro-image-preview, gemini-3.1-flash-image-preview）
 - **新增**：支持更多參數（quality, style, seed, temperature, top_p, top_k, negative_prompt）
+- **新增**：官方 Gemini 3.1 Flash 格式參數（personGeneration, outputMimeType, aspectRatio）
 
 ### ✅ REST API
 - **POST** `/api/generate` - 原始 API（含完整響應）
 - **GET** `/api/models` - 完整模型配置列表（供 Web UI 使用）
+- **GET** `/api/upstreams` - 上游狀態檢查（負載平衡監控）
 - 詳細的請求/響應分析
 - 錯誤追蹤和調試信息
+
+### ✅ 負載平衡（Load Balancing）
+- **多上游支援**：AppMedo（主要）+ Supabase（備用）
+- **自動故障轉移**：連續 3 次錯誤後自動切換
+- **智能路由**：按優先級選擇可用上游
+- **狀態追蹤**：即時監控上游健康狀態
 
 ## 🚀 快速開始
 
@@ -338,6 +376,25 @@ MIT License
 <a name="english"></a>
 ## English Documentation
 
+## 📋 Latest Updates
+
+### v2.1.0 (2026-02-28)
+- ✨ **Added official Gemini 3.1 Flash API format support**
+  - Added `aspectRatio: "21:9"` widescreen ratio
+  - Added `personGeneration` control (allow_all, allow_adult, dont_allow)
+  - Added `outputMimeType` output format (image/png, image/jpeg, image/webp)
+  - Added `numberOfImages` mapping to `imageConfig`
+  - `seed` parameter moved inside `imageConfig` (official format)
+- 🔧 **Default model changed to `gemini-3.1-flash-image-preview`**
+- 📝 **Updated documentation for new parameters**
+
+### v2.0.0 (2026-02-27)
+- ✨ Added multi-model support (MODEL_REGISTRY)
+- ✨ Added Web UI model selection dropdown
+- ✨ Added Debug mode (full request/response analysis)
+- ✨ Added official Gemini API format support
+- 🐛 Fixed image generation issue (empty base64 data)
+
 ## 🎉 Features
 
 ### ✅ Web UI
@@ -345,8 +402,9 @@ MIT License
 - Real-time API request/response analysis
 - Support for multiple image sizes
 - Temperature parameter adjustment
-- **New**: Model selection dropdown (Gemini 3 Pro / Gemini 3.1 Pro)
+- **New**: Model selection dropdown (Gemini 3 Pro / Gemini 3.1 Flash)
 - **New**: Quality, style, seed, Top-P, Top-K and other advanced parameters
+- **New**: Debug mode switch
 
 ### ✅ OpenAI Compatible API
 - **POST** `/v1/images/generations` - Image generation
@@ -354,8 +412,9 @@ MIT License
 - **GET** `/v1/models/{model_id}` - Single model details
 - Fully compatible with OpenAI SDK
 - Support for Base64 and URL response formats
-- **New**: Multi-model support (gemini-3-pro-image-preview, gemini-3.1-pro-preview)
+- **New**: Multi-model support (gemini-3-pro-image-preview, gemini-3.1-flash-image-preview)
 - **New**: Support for more parameters (quality, style, seed, temperature, top_p, top_k, negative_prompt)
+- **New**: Official Gemini 3.1 Flash format parameters (personGeneration, outputMimeType, aspectRatio)
 
 ### ✅ REST API
 - **POST** `/api/generate` - Original API (with full response)
