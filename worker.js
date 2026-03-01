@@ -209,20 +209,21 @@ const UPSTREAMS = {
     models: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]
   },
   "supabase": {
-    id: "supabase",
-    name: "Supabase Backup",
-    type: "openai-compatible",
-    baseUrl: "https://gjosebfngzowbcrwzxnw.supabase.co/functions/v1/openai-compatible",
-    apiKey: "nb_QkIB2xAU3NPr3zCNNhHns4qj4YP9Ij763dUY8hG0SrrOMDWx",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    priority: 2,
-    status: "active",
-    healthCheck: null,
-    lastError: null,
-    errorCount: 0,
-    models: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]
+  	id: "supabase",
+  	name: "Supabase Backup",
+  	type: "openai-compatible",
+  	baseUrl: "https://gjosebfngzowbcrwzxnw.supabase.co/functions/v1/openai-compatible",
+  	apiKey: null, // 使用環境變數 SUPABASE_API_KEY
+  	envKey: "SUPABASE_API_KEY", // 環境變數名稱
+  	headers: {
+  		"Content-Type": "application/json"
+  	},
+  	priority: 2,
+  	status: "active",
+  	healthCheck: null,
+  	lastError: null,
+  	errorCount: 0,
+  	models: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]
   }
 };
 
@@ -276,22 +277,33 @@ function markUpstreamSuccess(upstreamId) {
 
 // 建構上游 API URL
 function buildUpstreamUrl(upstream, modelId) {
-  if (upstream.type === "gemini-proxy") {
-    return `${upstream.baseUrl}/${modelId}:generateContent`;
-  } else if (upstream.type === "openai-compatible") {
-    // OpenAI 兼容格式使用 /v1/images/generations
-    return `${upstream.baseUrl}/v1/images/generations`;
-  }
-  return upstream.baseUrl;
+	if (upstream.type === "gemini-proxy") {
+		return `${upstream.baseUrl}/${modelId}:generateContent`;
+	} else if (upstream.type === "openai-compatible") {
+		// OpenAI 兼容格式 - 直接使用 baseUrl（完整端點 URL）
+		// 如果 baseUrl 已經是完整端點，直接使用；否則加上標準路徑
+		if (upstream.baseUrl.includes("/functions/") || upstream.baseUrl.includes("/v1/")) {
+			// Supabase Functions 或其他完整端點 URL
+			return upstream.baseUrl;
+		}
+		// 標準 OpenAI 格式
+		return `${upstream.baseUrl}/v1/images/generations`;
+	}
+	return upstream.baseUrl;
 }
 
 // 取得上游 API Key
 function getUpstreamApiKey(upstream, env) {
-  if (upstream.apiKey) {
-    return upstream.apiKey;
-  }
-  // 使用環境變數
-  return env?.API_KEY || "";
+	// 優先使用硬編碼的 apiKey
+	if (upstream.apiKey) {
+		return upstream.apiKey;
+	}
+	// 使用指定的環境變數名稱（如 SUPABASE_API_KEY）
+	if (upstream.envKey && env?.[upstream.envKey]) {
+		return env[upstream.envKey];
+	}
+	// 使用預設環境變數
+	return env?.API_KEY || "";
 }
 
 // 帶故障轉移的 fetch 函數

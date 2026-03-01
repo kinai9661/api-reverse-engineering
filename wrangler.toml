@@ -7,3 +7,11 @@ command = ""
 
 [build.upload]
 format = "service-worker"
+
+# 環境變數配置
+# 使用 wrangler secret put SUPABASE_API_KEY 設定
+# 或在 Cloudflare Dashboard > Workers > Settings > Variables 中設定
+
+# [vars]
+# API_KEY = "your-primary-api-key"
+# SUPABASE_API_KEY = "your-supabase-api-key"
