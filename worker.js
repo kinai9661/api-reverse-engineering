@@ -361,15 +361,22 @@ async function tryUpstreams(upstreams, modelId, requestBody, env, debugMode) {
       }
       
       const data = await response.json();
-      
+     
+      // 驗證回應包含有效的圖片數據
+      // 如果沒有有效圖片，拋出錯誤以觸發故障轉移到下一個上游
+      const imageResult = extractImageData(data);
+      if (imageResult.error) {
+      	throw new Error(`Upstream ${upstream.id} returned no valid image data: ${imageResult.error} (type: ${imageResult.errorType || 'unknown'})`);
+      }
+     
       // 標記成功
       markUpstreamSuccess(upstream.id);
-      
+     
       return {
-        success: true,
-        data: data,
-        upstream: upstream.id,
-        upstreamType: upstream.type
+      	success: true,
+      	data: data,
+      	upstream: upstream.id,
+      	upstreamType: upstream.type
       };
       
     } catch (error) {
